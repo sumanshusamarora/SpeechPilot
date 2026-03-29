@@ -60,8 +60,12 @@ class SpeechCoachSessionManager(
     private val managerScope = CoroutineScope(SupervisorJob() + dispatcher)
     private var pipelineJob: Job? = null
 
-    override suspend fun start() {
-        if (_state.value != SessionState.Idle) return
+    override suspend fun start(mode: SessionMode) {
+        // Guard: ignore if already starting, active, or stopping.
+        when (_state.value) {
+            is SessionState.Starting, is SessionState.Active, is SessionState.Stopping -> return
+            else -> Unit
+        }
         _state.value = SessionState.Starting
         paceEstimator.reset()
         rollingPaceWindow.reset()
@@ -72,6 +76,7 @@ class SpeechCoachSessionManager(
             _liveState.update {
                 it.copy(
                     sessionState = SessionState.Active,
+                    mode = mode,
                     isListening = true,
                     stats = SessionStats(startedAtMs = sessionStartMs)
                 )
@@ -86,9 +91,8 @@ class SpeechCoachSessionManager(
                     val durationMs = System.currentTimeMillis() - sessionStartMs
 
                     // Dispatch to the external output channel (e.g. vibration) when a new
-                    // feedback event was produced. OnTarget is dispatched as well so the
-                    // dispatcher can decide whether to act on it.
-                    if (feedback != null) {
+                    // feedback event was produced. Suppressed in Passive mode.
+                    if (feedback != null && _liveState.value.mode == SessionMode.Active) {
                         feedbackDispatcher?.dispatch(feedback)
                     }
 
@@ -131,7 +135,11 @@ class SpeechCoachSessionManager(
     }
 
     override suspend fun stop() {
-        if (_state.value == SessionState.Idle) return
+        // Guard: ignore if already idle or in the process of stopping.
+        when (_state.value) {
+            is SessionState.Idle, is SessionState.Stopping -> return
+            else -> Unit
+        }
         _state.value = SessionState.Stopping
         pipelineJob?.cancelAndJoin()
         pipelineJob = null

@@ -15,8 +15,19 @@ serving.
 
 ### `app`
 
-Application entry point. Wires modules together. Contains `Application` subclass and a single
-`Activity`. No business logic lives here.
+Application entry point. Wires modules together. Contains `Application` subclass, a single
+`Activity`, and `SpeechCoachingService`. No business logic lives here.
+
+`SpeechPilotApp` creates the notification channel used by the foreground service.
+`SpeechCoachingService` is started when a session becomes active and stopped when the session
+ends. Its sole purpose is to post a persistent notification so Android does not terminate the
+process when the user backgrounds the app mid-session. The session and audio pipeline remain
+owned by `MainViewModel` (via `SpeechCoachSessionManager`).
+
+**Background behaviour:** `SpeechCoachingService` keeps the process alive during backgrounding.
+It does not survive process death — if the process is killed, the session is lost. This is the
+expected Phase 1 limitation. The service is declared with `foregroundServiceType="microphone"`
+and the `FOREGROUND_SERVICE_MICROPHONE` permission is declared for Android 14+ compatibility.
 
 ### `ui`
 
@@ -29,6 +40,17 @@ Central orchestrator. Owns the session lifecycle. Connects the audio pipeline:
 `audio → vad → segmentation → pace → feedback`. Exposes `SessionState` and `LiveSessionState`
 as `StateFlow` consumed by `:ui`. Session control (start / stop) is the only entry point into
 the pipeline.
+
+**Session mode:** `SessionManager.start()` accepts a `SessionMode` parameter (default `Active`).
+
+- `SessionMode.Active` — full coaching session with pace estimation and feedback dispatch.
+- `SessionMode.Passive` — audio capture and speech detection run normally, but feedback
+  dispatch is suppressed. This is the Phase 1 anchor for future passive/always-listen work.
+  It is not a full background daemon.
+
+**Guarded lifecycle transitions:** `start()` is a no-op if the session is already Starting,
+Active, or Stopping. `stop()` is a no-op if the session is already Idle or Stopping. This
+prevents race conditions from repeated UI events.
 
 Also maintains session-level summary stats (`SessionStats`) and persists them via
 `SessionRepository` at session end.
@@ -175,6 +197,7 @@ MicrophoneCapture ──► AudioFrame (Flow)
 | Field | Description |
 |---|---|
 | `sessionState` | Current lifecycle state (Idle / Starting / Active / Stopping / Error) |
+| `mode` | Operational mode of the session (`Active` or `Passive`) |
 | `isListening` | True while audio pipeline is active |
 | `isSpeechDetected` | True once at least one segment has been detected |
 | `currentWpm` | Most recent raw estimated WPM (approximate proxy) |
@@ -253,6 +276,28 @@ time-sensitive tests without `Thread.sleep`.
 5. Network operations: none. All data stays on-device.
 6. Pace estimation is modular — `PaceEstimator` and `RollingPaceWindow` are independently
    replaceable without changing the session pipeline.
+7. `start()` and `stop()` are idempotent — calling them in an invalid state is a safe no-op.
+8. Feedback dispatch is suppressed in `SessionMode.Passive`; the rest of the pipeline runs normally.
+
+---
+
+## Background Behaviour
+
+**Supported:** `SpeechCoachingService` is started as a foreground service when a session begins.
+It posts a persistent notification that prevents Android from killing the process while the user
+has backgrounded the app. Sessions remain active across app backgrounding, screen lock/unlock,
+and app-to-recents transitions.
+
+**Known limitation:** The session is held in `MainViewModel` scope. If the OS kills the process
+(e.g. extreme memory pressure while backgrounded despite the foreground service), the session
+is lost. Process-death recovery is not implemented in Phase 1.
+
+## Passive Mode Groundwork
+
+`SessionMode.Passive` is an explicit named anchor for future lightweight always-listen behaviour.
+In Phase 1 it is fully functional as a mode switch that suppresses feedback dispatch while
+keeping the audio pipeline running. True always-on background listening (without a user-initiated
+session) is **not** implemented and is deferred to a future iteration.
 
 ---
 
@@ -264,7 +309,7 @@ Phase 1 delivers a working runtime slice including:
 - Interfaces and data classes defining the contracts between modules
 - Energy-based VAD, segment-based pace estimator, EMA rolling window
 - Session summary stats (start time, duration, speech duration, segment count, avg/peak WPM)
-- Live state exposed to the UI (listening, speech detected, current + smoothed WPM, alertActive)
+- Live state exposed to the UI (listening, speech detected, current + smoothed WPM, alertActive, mode)
 - Feedback decisioning: threshold, cooldown, and sustain/debounce logic (`ThresholdFeedbackDecision`)
 - Vibration feedback output (`VibrationFeedbackDispatcher`) behind the `FeedbackDispatcher` abstraction
 - Room-backed session summary persistence (`RoomSessionRepository`, `SpeechPilotDatabase`)
@@ -272,7 +317,11 @@ Phase 1 delivers a working runtime slice including:
 - Minimal settings screen (pace threshold, tolerance band, feedback cooldown sliders)
 - Minimal session history screen (list of saved sessions with date, duration, speech time, segments, avg/peak WPM)
 - Simple screen-switcher navigation (no nav library required in Phase 1)
-- Unit tests for VAD, pace estimation, rolling window, feedback (threshold, cooldown, sustain, invalid-pace), session lifecycle, and data/settings models
+- `SpeechCoachingService` foreground service for background session stability
+- `SessionMode` enum (`Active` / `Passive`) as foundation for passive-mode work
+- Guarded `start()`/`stop()` lifecycle (idempotent, safe no-ops on invalid transitions)
+- Improved live session UI (speech-detected indicator, error display, passive-mode badge)
+- Unit tests for VAD, pace estimation, rolling window, feedback (threshold, cooldown, sustain, invalid-pace), session lifecycle, session mode, and data/settings models
 
 Phase 1 does **not** include:
 - Real word-boundary or syllable detection (current WPM is a proxy)
@@ -281,4 +330,6 @@ Phase 1 does **not** include:
 - STT or LLM features
 - Dependency injection framework
 - Settings changes applied to a running session (changes take effect on next session start)
+- Session recovery after process death
+- True always-on background listening daemon
 

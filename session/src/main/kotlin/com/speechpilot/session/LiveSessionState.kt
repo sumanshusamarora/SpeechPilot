@@ -10,6 +10,8 @@ import com.speechpilot.feedback.FeedbackEvent
  */
 data class LiveSessionState(
     val sessionState: SessionState = SessionState.Idle,
+    /** Operational mode of the current (or most recent) session. */
+    val mode: SessionMode = SessionMode.Active,
     /** True while the audio pipeline is active and frames are being captured. */
     val isListening: Boolean = false,
     /** True once at least one speech segment has been detected in the current session. */

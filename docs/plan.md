@@ -60,7 +60,31 @@
 
 ---
 
-## Iteration 5 — Improved Pace Estimation
+## Iteration 5 — Quick-Start, Background Hardening, Passive Mode, UX Cleanup ✅
+
+**Goal:** Improve runtime robustness, reduce session-start friction, add passive-mode foundation, and clean up live session UX.
+
+- [x] Add `SessionMode` enum (`Active` / `Passive`) to `:session`
+- [x] Add `mode: SessionMode` field to `LiveSessionState`
+- [x] Update `SessionManager.start()` to accept `mode: SessionMode = SessionMode.Active`
+- [x] Guard `SpeechCoachSessionManager.start()` — no-op if already Starting/Active/Stopping
+- [x] Guard `SpeechCoachSessionManager.stop()` — no-op if already Idle/Stopping
+- [x] Suppress feedback dispatch in `SessionMode.Passive`
+- [x] Create `SpeechCoachingService` foreground service to keep process alive during backgrounding
+- [x] Add `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MICROPHONE` permissions to manifest
+- [x] Wire service start/stop from `MainActivity` observing live session state
+- [x] Create notification channel in `SpeechPilotApp.onCreate()`
+- [x] Add `errorMessage: String?` and `sessionMode: SessionMode` to `MainUiState`
+- [x] Surface error state and session mode from `LiveSessionState` in `MainViewModel`
+- [x] Add `dismissError()` to `MainViewModel`
+- [x] Improve `MainScreen` UX: speech-active indicator, passive-mode badge, error display, layout cleanup
+- [x] Add `SessionModeTest` — enum equality, default in `LiveSessionState`, copy behaviour
+- [x] Add session idempotency tests — double-stop, stop without start, mode storage
+- [x] Update `phase1_architecture.md` with background service, passive mode, invariants
+
+---
+
+## Iteration 6 — Improved Pace Estimation
 
 **Goal:** Replace placeholder WPM estimation with a real word-boundary approach.
 
@@ -71,7 +95,7 @@
 
 ---
 
-## Iteration 6 — Polish and QA
+## Iteration 7 — Polish and QA
 
 **Goal:** Release-candidate quality.
 
