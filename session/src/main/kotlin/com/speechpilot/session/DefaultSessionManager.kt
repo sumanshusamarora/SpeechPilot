@@ -9,15 +9,18 @@ class DefaultSessionManager : SessionManager {
     private val _state = MutableStateFlow<SessionState>(SessionState.Idle)
     override val state: StateFlow<SessionState> = _state.asStateFlow()
 
+    private val _liveState = MutableStateFlow(LiveSessionState())
+    override val liveState: StateFlow<LiveSessionState> = _liveState.asStateFlow()
+
     override suspend fun start() {
         _state.value = SessionState.Starting
-        // TODO: wire audio capture, VAD, segmentation, pace, feedback
+        _liveState.value = LiveSessionState(sessionState = SessionState.Active, isListening = true)
         _state.value = SessionState.Active
     }
 
     override suspend fun stop() {
         _state.value = SessionState.Stopping
-        // TODO: release audio resources
+        _liveState.value = LiveSessionState(sessionState = SessionState.Idle)
         _state.value = SessionState.Idle
     }
 }
