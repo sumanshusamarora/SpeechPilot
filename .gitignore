@@ -1,3 +1,14 @@
+# Android / Gradle build outputs
+.gradle/
+build/
+*/build/
+local.properties
+
+# Android Studio IDE files
+*.iml
+.idea/
+.DS_Store
+
 # Compiled class file
 *.class
 
@@ -12,6 +23,8 @@
 
 # Package Files #
 *.jar
+# Keep the Gradle wrapper JAR so the project can bootstrap without a local Gradle install
+!gradle/wrapper/gradle-wrapper.jar
 *.war
 *.nar
 *.ear
