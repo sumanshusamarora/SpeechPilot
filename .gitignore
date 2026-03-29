@@ -23,6 +23,8 @@ local.properties
 
 # Package Files #
 *.jar
+# Keep the Gradle wrapper JAR so the project can bootstrap without a local Gradle install
+!gradle/wrapper/gradle-wrapper.jar
 *.war
 *.nar
 *.ear
