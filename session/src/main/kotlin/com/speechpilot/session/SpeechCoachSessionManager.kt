@@ -5,6 +5,8 @@ import com.speechpilot.audio.MicrophoneCapture
 import com.speechpilot.data.SessionRecord
 import com.speechpilot.data.SessionRepository
 import com.speechpilot.feedback.FeedbackDecision
+import com.speechpilot.feedback.FeedbackDispatcher
+import com.speechpilot.feedback.FeedbackEvent
 import com.speechpilot.feedback.ThresholdFeedbackDecision
 import com.speechpilot.pace.PaceEstimator
 import com.speechpilot.pace.RollingPaceWindow
@@ -33,6 +35,8 @@ import kotlinx.coroutines.launch
  *
  * @param segmenter Speech segmenter used to convert audio frames into speech segments.
  *   Defaults to [VadSpeechSegmenter] with energy-based VAD. Swap to inject a stub in tests.
+ * @param feedbackDispatcher Optional dispatcher that executes feedback events (e.g. vibration).
+ *   If null, feedback events are evaluated and stored in live state but not dispatched externally.
  * @param sessionRepository Optional repository for persisting session summaries.
  *   If null, sessions are not persisted (safe to omit until Room wiring is complete).
  */
@@ -42,6 +46,7 @@ class SpeechCoachSessionManager(
     private val paceEstimator: PaceEstimator = RollingWindowPaceEstimator(),
     private val rollingPaceWindow: RollingPaceWindow = RollingPaceWindow(),
     private val feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
+    private val feedbackDispatcher: FeedbackDispatcher? = null,
     private val sessionRepository: SessionRepository? = null,
     dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : SessionManager {
@@ -80,6 +85,13 @@ class SpeechCoachSessionManager(
                     val feedback = feedbackDecision.evaluate(metrics)
                     val durationMs = System.currentTimeMillis() - sessionStartMs
 
+                    // Dispatch to the external output channel (e.g. vibration) when a new
+                    // feedback event was produced. OnTarget is dispatched as well so the
+                    // dispatcher can decide whether to act on it.
+                    if (feedback != null) {
+                        feedbackDispatcher?.dispatch(feedback)
+                    }
+
                     _liveState.update { current ->
                         val newStats = current.stats.copy(
                             durationMs = durationMs,
@@ -89,11 +101,20 @@ class SpeechCoachSessionManager(
                             averageEstimatedWpm = rollingPaceWindow.averageEstimatedWpm(),
                             peakEstimatedWpm = rollingPaceWindow.peakEstimatedWpm()
                         )
+                        // alertActive tracks whether the most recent event was a coaching alert.
+                        // It resets to false when pace returns to target; holds its last value
+                        // when no new feedback event fires (cooldown / null).
+                        val newAlertActive = when (feedback) {
+                            FeedbackEvent.SlowDown, FeedbackEvent.SpeedUp -> true
+                            FeedbackEvent.OnTarget -> false
+                            null -> current.alertActive
+                        }
                         current.copy(
                             isSpeechDetected = true,
                             currentWpm = metrics.estimatedWpm.toFloat(),
                             smoothedWpm = rollingPaceWindow.smoothedEstimatedWpm().toFloat(),
                             latestFeedback = feedback ?: current.latestFeedback,
+                            alertActive = newAlertActive,
                             stats = newStats
                         )
                     }

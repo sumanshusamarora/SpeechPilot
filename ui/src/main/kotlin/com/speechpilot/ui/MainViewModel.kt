@@ -1,7 +1,9 @@
 package com.speechpilot.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.speechpilot.feedback.VibrationFeedbackDispatcher
 import com.speechpilot.session.SessionState
 import com.speechpilot.session.SpeechCoachSessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,9 +12,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class MainViewModel : ViewModel() {
+class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val sessionManager = SpeechCoachSessionManager()
+    private val sessionManager by lazy {
+        SpeechCoachSessionManager(
+            feedbackDispatcher = VibrationFeedbackDispatcher(getApplication())
+        )
+    }
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -29,6 +35,7 @@ class MainViewModel : ViewModel() {
                         smoothedWpm = live.smoothedWpm,
                         segmentCount = live.stats.segmentCount,
                         latestFeedback = live.latestFeedback,
+                        alertActive = live.alertActive,
                         statusText = when (live.sessionState) {
                             SessionState.Idle ->
                                 if (current.permissionGranted) "Ready" else "Microphone permission required"

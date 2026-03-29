@@ -77,11 +77,13 @@ private fun MainContent(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = when (feedback) {
-                    FeedbackEvent.SlowDown -> "Slow down"
-                    FeedbackEvent.SpeedUp -> "Speed up"
+                    FeedbackEvent.SlowDown -> "⚠ Slow down"
+                    FeedbackEvent.SpeedUp -> "⚠ Speed up"
                     FeedbackEvent.OnTarget -> "On target ✓"
                 },
-                style = MaterialTheme.typography.bodyLarge
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (state.alertActive) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface
             )
         }
 

@@ -80,9 +80,31 @@ PaceMetrics(estimatedWpm: Double, windowDurationMs: Long)
 
 ### `feedback`
 
-Evaluates `PaceMetrics` against configurable targets. Produces a `FeedbackEvent` (SlowDown,
-SpeedUp, OnTarget) subject to a cooldown to avoid spam. Decision logic is separated from
-delivery — `:ui` is responsible for rendering the event.
+Evaluates `PaceMetrics` against configurable targets and dispatches feedback to the user.
+Contains three components that are cleanly separated:
+
+1. **`FeedbackDecision` interface** — stable contract for decision logic.
+2. **`ThresholdFeedbackDecision`** — threshold-based decision engine with cooldown and sustain
+   debounce. Guards against invalid pace, suppresses repeat alerts via a configurable cooldown,
+   and requires a configurable number of consecutive over-threshold observations before firing a
+   `SlowDown` alert (avoids reacting to single noisy spikes). Decision logic is deterministic
+   and fully unit-testable.
+3. **`FeedbackDispatcher` interface** — stable contract for feedback output, decoupled from
+   decision logic. Implementations are swappable without touching the session or decisioning code.
+4. **`VibrationFeedbackDispatcher`** — delivers `SlowDown` and `SpeedUp` events as a short,
+   subtle device vibration (80 ms pulse). `OnTarget` produces no vibration. Devices without a
+   vibrator are handled gracefully. Uses `VibratorManager` on API 31+ and falls back to
+   `Vibrator` on API 26–30.
+
+```
+FeedbackEvent: SlowDown | SpeedUp | OnTarget
+FeedbackMode:  Vibration                         (Phase 1 only)
+```
+
+> **Limitation:** This is a first-pass coaching loop, not a clinically validated system.
+> Feedback thresholds are configurable but not automatically personalised. The pace signal is
+> an approximate proxy (see `pace` module), so feedback events reflect relative pace changes,
+> not absolute speaking rate.
 
 ### `data`
 
@@ -121,8 +143,12 @@ MicrophoneCapture ──► AudioFrame (Flow)
                    ThresholdFeedbackDecision ──► FeedbackEvent?
                           │
                           ▼
+                   VibrationFeedbackDispatcher ──► Device vibration (subtle pulse)
+                          │
+                          ▼
                    SpeechCoachSessionManager ──► LiveSessionState (StateFlow)
                           │                      SessionStats (session summary)
+                          │                      alertActive flag
                           ▼
                    SessionRepository ──► SessionRecord (persistence)
                           │
@@ -144,6 +170,7 @@ MicrophoneCapture ──► AudioFrame (Flow)
 | `currentWpm` | Most recent raw estimated WPM (approximate proxy) |
 | `smoothedWpm` | EMA-smoothed estimated WPM (reduces per-segment noise) |
 | `latestFeedback` | Most recent `FeedbackEvent`, if any |
+| `alertActive` | True when the most recent feedback was SlowDown or SpeedUp |
 | `stats` | Session-level `SessionStats` snapshot |
 
 ---
@@ -175,11 +202,43 @@ MicrophoneCapture ──► AudioFrame (Flow)
 
 ---
 
+## Feedback Decisioning
+
+`ThresholdFeedbackDecision` is the first-pass coaching engine. It applies the following rules:
+
+1. **Invalid-pace guard** — no feedback if `estimatedWpm ≤ 0`.
+2. **Cooldown** — suppresses repeat events for a configurable window (default 5 s).
+3. **Sustain / debounce (SlowDown only)** — requires `sustainCount` consecutive
+   over-threshold observations before a `SlowDown` alert fires (default: 2).
+   This avoids reacting to single noisy spikes in the pace signal.
+4. `SpeedUp` and `OnTarget` fire on the first qualifying observation (no debounce).
+
+All rules are deterministic and unit-tested. A configurable `clock` lambda allows
+time-sensitive tests without `Thread.sleep`.
+
+> **This is not a clinically validated system.** Thresholds and cooldown values are
+> reasonable defaults intended for a first pass. The pace signal itself is a proxy measure.
+
+---
+
+## Vibration Feedback
+
+`VibrationFeedbackDispatcher` triggers a short vibration (80 ms, ~31% amplitude) for
+`SlowDown` and `SpeedUp` events. `OnTarget` produces no vibration. The implementation:
+
+- Uses `VibratorManager` on API 31+ and the deprecated `Vibrator` service on API 26–30.
+- Calls `hasVibrator()` before every vibration — no-ops on devices without a vibrator.
+- Is wired into `SpeechCoachSessionManager` via the optional `feedbackDispatcher` parameter.
+  If no dispatcher is provided, feedback events are evaluated and stored in `LiveSessionState`
+  but no on-device output is produced.
+
+---
+
 ## Key Invariants
 
 1. Audio capture never runs on the main thread.
 2. `SessionManager` is the single entry point for starting and stopping the pipeline.
-3. Feedback decision logic (`FeedbackDecision`) is decoupled from feedback rendering.
+3. Feedback decision logic (`FeedbackDecision`) is decoupled from feedback dispatch (`FeedbackDispatcher`).
 4. No global mutable state outside of `DefaultSessionManager`.
 5. Network operations: none. All data stays on-device.
 6. Pace estimation is modular — `PaceEstimator` and `RollingPaceWindow` are independently
@@ -195,15 +254,17 @@ Phase 1 delivers a working runtime slice including:
 - Interfaces and data classes defining the contracts between modules
 - Energy-based VAD, segment-based pace estimator, EMA rolling window
 - Session summary stats (start time, duration, speech duration, segment count, avg/peak WPM)
-- Live state exposed to the UI (listening, speech detected, current + smoothed WPM)
+- Live state exposed to the UI (listening, speech detected, current + smoothed WPM, alertActive)
+- Feedback decisioning: threshold, cooldown, and sustain/debounce logic (`ThresholdFeedbackDecision`)
+- Vibration feedback output (`VibrationFeedbackDispatcher`) behind the `FeedbackDispatcher` abstraction
 - Persistence model ready (`SessionRecord`, `SessionRepository`) — Room wiring deferred
-- Unit tests for VAD, pace estimation, rolling window, feedback, and session lifecycle
+- Unit tests for VAD, pace estimation, rolling window, feedback (threshold, cooldown, sustain, invalid-pace), and session lifecycle
 
 Phase 1 does **not** include:
 - Real word-boundary or syllable detection (current WPM is a proxy)
 - Room database schema or migrations
 - DataStore wiring
-- Vibration / audio feedback output
+- Tone / audio feedback output (vibration only in Phase 1)
 - STT or LLM features
 - Dependency injection framework
 
