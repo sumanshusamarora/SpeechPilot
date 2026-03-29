@@ -98,6 +98,49 @@ class SpeechCoachSessionManagerTest {
         manager.release()
     }
 
+    @Test
+    fun `calling stop twice is safe`() = runTest {
+        val manager = buildManager(testScheduler)
+        manager.start()
+        manager.stop()
+        assertEquals(SessionState.Idle, manager.state.value)
+        manager.stop()
+        assertEquals(SessionState.Idle, manager.state.value)
+        manager.release()
+    }
+
+    @Test
+    fun `calling stop without start is safe`() = runTest {
+        val manager = buildManager(testScheduler)
+        manager.stop()
+        assertEquals(SessionState.Idle, manager.state.value)
+        manager.release()
+    }
+
+    @Test
+    fun `start with Active mode stores mode in liveState`() = runTest {
+        val manager = buildManager(testScheduler)
+        manager.start(SessionMode.Active)
+        assertEquals(SessionMode.Active, manager.liveState.value.mode)
+        manager.release()
+    }
+
+    @Test
+    fun `start with Passive mode stores mode in liveState`() = runTest {
+        val manager = buildManager(testScheduler)
+        manager.start(SessionMode.Passive)
+        assertEquals(SessionMode.Passive, manager.liveState.value.mode)
+        manager.release()
+    }
+
+    @Test
+    fun `default start mode is Active`() = runTest {
+        val manager = buildManager(testScheduler)
+        manager.start()
+        assertEquals(SessionMode.Active, manager.liveState.value.mode)
+        manager.release()
+    }
+
     // ── segment processing ─────────────────────────────────────────────────────
 
     @Test

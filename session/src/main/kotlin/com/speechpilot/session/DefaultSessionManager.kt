@@ -12,9 +12,9 @@ class DefaultSessionManager : SessionManager {
     private val _liveState = MutableStateFlow(LiveSessionState())
     override val liveState: StateFlow<LiveSessionState> = _liveState.asStateFlow()
 
-    override suspend fun start() {
+    override suspend fun start(mode: SessionMode) {
         _state.value = SessionState.Starting
-        _liveState.value = LiveSessionState(sessionState = SessionState.Active, isListening = true)
+        _liveState.value = LiveSessionState(sessionState = SessionState.Active, mode = mode, isListening = true)
         _state.value = SessionState.Active
     }
 

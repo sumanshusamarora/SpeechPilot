@@ -7,6 +7,7 @@ import com.speechpilot.data.RoomSessionRepository
 import com.speechpilot.data.SpeechPilotDatabase
 import com.speechpilot.feedback.ThresholdFeedbackDecision
 import com.speechpilot.feedback.VibrationFeedbackDispatcher
+import com.speechpilot.session.SessionMode
 import com.speechpilot.session.SessionState
 import com.speechpilot.session.SpeechCoachSessionManager
 import com.speechpilot.settings.DataStoreAppSettings
@@ -51,8 +52,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             sessionManager = mgr
             mgr.liveState.collect { live ->
                 _uiState.update { current ->
+                    val isActive = live.sessionState == SessionState.Active
+                    val errorMessage = when (val s = live.sessionState) {
+                        is SessionState.Error -> s.cause.localizedMessage ?: "Session error"
+                        is SessionState.Idle -> null
+                        else -> current.errorMessage
+                    }
                     current.copy(
-                        isSessionActive = live.sessionState == SessionState.Active,
+                        isSessionActive = isActive,
                         isListening = live.isListening,
                         isSpeechDetected = live.isSpeechDetected,
                         currentWpm = live.currentWpm,
@@ -60,13 +67,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         segmentCount = live.stats.segmentCount,
                         latestFeedback = live.latestFeedback,
                         alertActive = live.alertActive,
+                        sessionMode = live.mode,
+                        errorMessage = errorMessage,
                         statusText = when (live.sessionState) {
                             SessionState.Idle ->
                                 if (current.permissionGranted) "Ready" else "Microphone permission required"
                             SessionState.Starting -> "Starting…"
-                            SessionState.Active -> "Listening"
+                            SessionState.Active ->
+                                if (live.isSpeechDetected) "Speech detected" else "Listening…"
                             SessionState.Stopping -> "Stopping…"
-                            is SessionState.Error -> "Error"
+                            is SessionState.Error -> "Session error"
                         }
                     )
                 }
@@ -83,15 +93,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startSession() {
+    fun startSession(mode: SessionMode = SessionMode.Active) {
         val mgr = sessionManager ?: return
-        if (!_uiState.value.permissionGranted) return
-        viewModelScope.launch { mgr.start() }
+        if (!_uiState.value.permissionGranted) {
+            _uiState.update { it.copy(errorMessage = "Microphone permission is required to start a session.") }
+            return
+        }
+        // Clear any previous error before starting.
+        _uiState.update { it.copy(errorMessage = null) }
+        viewModelScope.launch { mgr.start(mode) }
     }
 
     fun stopSession() {
         val mgr = sessionManager ?: return
         viewModelScope.launch { mgr.stop() }
+    }
+
+    fun dismissError() {
+        _uiState.update { it.copy(errorMessage = null) }
     }
 
     override fun onCleared() {

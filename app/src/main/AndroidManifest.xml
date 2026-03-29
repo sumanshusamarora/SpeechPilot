@@ -3,6 +3,9 @@
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Required on Android 14+ (API 34+) when using foreground service with microphone access -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <application
         android:name=".SpeechPilotApp"
@@ -20,6 +23,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Foreground service that keeps the process alive during active coaching sessions -->
+        <service
+            android:name=".service.SpeechCoachingService"
+            android:foregroundServiceType="microphone"
+            android:exported="false" />
 
     </application>
 

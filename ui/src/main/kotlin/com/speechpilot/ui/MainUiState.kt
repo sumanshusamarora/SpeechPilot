@@ -1,6 +1,7 @@
 package com.speechpilot.ui
 
 import com.speechpilot.feedback.FeedbackEvent
+import com.speechpilot.session.SessionMode
 
 data class MainUiState(
     val statusText: String = "Ready",
@@ -18,5 +19,9 @@ data class MainUiState(
      * Resets to false when pace returns to target.
      */
     val alertActive: Boolean = false,
-    val permissionGranted: Boolean = false
+    val permissionGranted: Boolean = false,
+    /** Non-null when the session has encountered a runtime error. Cleared on next session start. */
+    val errorMessage: String? = null,
+    /** Operational mode of the current or most recently completed session. */
+    val sessionMode: SessionMode = SessionMode.Active
 )
