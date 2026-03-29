@@ -34,26 +34,29 @@
 
 ---
 
-## Iteration 3 — Persistence
+## Iteration 3 — Persistence ✅
 
 **Goal:** Record and display session history.
 
-- [ ] Implement Room `@Entity` for `SessionRecord` and `@Dao`
-- [ ] Implement `RoomSessionRepository`
-- [ ] Wire `DefaultSessionManager` to save a record on session stop
-- [ ] Add a history screen (list of past sessions)
-- [ ] Add migration infrastructure for Room schema versioning
+- [x] Implement Room `@Entity` for `SessionRecord` and `@Dao` (`SessionDao`)
+- [x] Implement `SpeechPilotDatabase` (Room database singleton)
+- [x] Implement `RoomSessionRepository`
+- [x] Wire `SpeechCoachSessionManager` to save a record on session stop via `SessionRepository`
+- [x] Add session history screen (`HistoryScreen`, `HistoryViewModel`)
+- [x] Unit tests for `SessionRecord` model and defaults
 
 ---
 
-## Iteration 4 — Settings
+## Iteration 4 — Settings ✅
 
 **Goal:** Let users configure pace targets.
 
-- [ ] Implement `DataStoreAppSettings`
-- [ ] Add settings screen with target WPM, tolerance, and cooldown sliders
-- [ ] Feed `UserPreferences` into `ThresholdFeedbackDecision` at runtime
-- [ ] Persist preferences across app restarts
+- [x] Implement `DataStoreAppSettings` (DataStore-backed)
+- [x] Add settings screen with target WPM, tolerance, and cooldown sliders (`SettingsScreen`, `SettingsViewModel`)
+- [x] Feed `UserPreferences` into `ThresholdFeedbackDecision` at session creation
+- [x] Persist preferences across app restarts
+- [x] Add lightweight screen-switcher navigation (`AppNavigation`)
+- [x] Unit tests for `UserPreferences` defaults and copy behavior
 
 ---
 

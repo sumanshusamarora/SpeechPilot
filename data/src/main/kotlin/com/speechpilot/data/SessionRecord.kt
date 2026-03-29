@@ -1,13 +1,19 @@
 package com.speechpilot.data
 
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
 /**
  * Persisted record of a completed coaching session.
  *
  * [averageEstimatedWpm] and [peakEstimatedWpm] are proxy-based estimates — not true WPM values.
  * See [com.speechpilot.pace.PaceMetrics] for details on the estimation methodology.
+ *
+ * Stored locally in the Room database. Never transmitted externally.
  */
+@Entity(tableName = "session_records")
 data class SessionRecord(
-    val id: Long = 0,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val startedAtMs: Long,
     val endedAtMs: Long,
     val durationMs: Long = endedAtMs - startedAtMs,

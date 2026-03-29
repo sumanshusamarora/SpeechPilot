@@ -2,13 +2,16 @@ package com.speechpilot.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -19,12 +22,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.speechpilot.feedback.FeedbackEvent
 
 @Composable
-fun MainScreen(viewModel: MainViewModel = viewModel()) {
+fun MainScreen(
+    viewModel: MainViewModel = viewModel(),
+    onOpenSettings: () -> Unit = {},
+    onOpenHistory: () -> Unit = {}
+) {
     val state by viewModel.uiState.collectAsState()
     MainContent(
         state = state,
         onStartSession = viewModel::startSession,
-        onStopSession = viewModel::stopSession
+        onStopSession = viewModel::stopSession,
+        onOpenSettings = onOpenSettings,
+        onOpenHistory = onOpenHistory
     )
 }
 
@@ -32,7 +41,9 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
 private fun MainContent(
     state: MainUiState,
     onStartSession: () -> Unit,
-    onStopSession: () -> Unit
+    onStopSession: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenHistory: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -41,6 +52,17 @@ private fun MainContent(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Navigation row at the top
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onOpenHistory) { Text("History") }
+            TextButton(onClick = onOpenSettings) { Text("Settings") }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
             text = state.statusText,
             style = MaterialTheme.typography.headlineMedium

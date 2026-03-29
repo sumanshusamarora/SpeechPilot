@@ -108,14 +108,24 @@ FeedbackMode:  Vibration                         (Phase 1 only)
 
 ### `data`
 
-Defines the `SessionRecord` data class and `SessionRepository` interface. Room schema and
-migrations are not yet wired (Phase 1 preparation only). `SessionRepository` is accepted as
-an optional dependency in `SpeechCoachSessionManager`; if null, sessions are not persisted.
+Defines the `SessionRecord` data class (Room `@Entity`) and `SessionRepository` interface.
+`RoomSessionRepository` is the Room-backed implementation, storing session summaries in a
+local SQLite database (`speech_pilot.db`). `SpeechPilotDatabase` is the Room database class
+(singleton, accessed via `SpeechPilotDatabase.getInstance(context)`).
+
+`SessionRepository` is injected as an optional dependency in `SpeechCoachSessionManager`;
+completed sessions are persisted automatically at session end. All data is local-only — no
+network transmission occurs.
 
 ### `settings`
 
-DataStore-backed user preferences. Owns the `UserPreferences` data class (target WPM, tolerance,
-cooldown, sample rate). All modules that need configuration read from `AppSettings`.
+DataStore-backed user preferences. `DataStoreAppSettings` is the concrete implementation of
+`AppSettings`, reading from and writing to `DataStore<Preferences>` under the key
+`user_preferences`. Persists: `targetWpm`, `tolerancePct`, `feedbackCooldownMs`,
+`micSampleRate`. All data is local-only.
+
+Settings are loaded once at `MainViewModel` initialisation time via `AppSettings.preferences.first()`.
+Changes saved via `SettingsViewModel` take effect from the next session start.
 
 ---
 
@@ -257,14 +267,18 @@ Phase 1 delivers a working runtime slice including:
 - Live state exposed to the UI (listening, speech detected, current + smoothed WPM, alertActive)
 - Feedback decisioning: threshold, cooldown, and sustain/debounce logic (`ThresholdFeedbackDecision`)
 - Vibration feedback output (`VibrationFeedbackDispatcher`) behind the `FeedbackDispatcher` abstraction
-- Persistence model ready (`SessionRecord`, `SessionRepository`) — Room wiring deferred
-- Unit tests for VAD, pace estimation, rolling window, feedback (threshold, cooldown, sustain, invalid-pace), and session lifecycle
+- Room-backed session summary persistence (`RoomSessionRepository`, `SpeechPilotDatabase`)
+- DataStore-backed settings persistence (`DataStoreAppSettings`) — target WPM, tolerance, cooldown, sample rate
+- Minimal settings screen (pace threshold, tolerance band, feedback cooldown sliders)
+- Minimal session history screen (list of saved sessions with date, duration, speech time, segments, avg/peak WPM)
+- Simple screen-switcher navigation (no nav library required in Phase 1)
+- Unit tests for VAD, pace estimation, rolling window, feedback (threshold, cooldown, sustain, invalid-pace), session lifecycle, and data/settings models
 
 Phase 1 does **not** include:
 - Real word-boundary or syllable detection (current WPM is a proxy)
-- Room database schema or migrations
-- DataStore wiring
+- Room database migrations (version 1 only in Phase 1)
 - Tone / audio feedback output (vibration only in Phase 1)
 - STT or LLM features
 - Dependency injection framework
+- Settings changes applied to a running session (changes take effect on next session start)
 
