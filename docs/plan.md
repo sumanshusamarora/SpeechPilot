@@ -19,16 +19,18 @@
 
 ---
 
-## Iteration 2 — Live Pipeline
+## Iteration 2 — Live Pipeline ✅
 
 **Goal:** Connect modules into a working real-time pipeline.
 
-- [ ] Wire `MicrophoneCapture → EnergyBasedVad → VadSpeechSegmenter → RollingWindowPaceEstimator → ThresholdFeedbackDecision` inside `DefaultSessionManager`
-- [ ] Implement `RECORD_AUDIO` permission request in `MainActivity`
-- [ ] Update `MainViewModel` to call `SessionManager.start()` / `stop()`
-- [ ] Expose `FeedbackEvent` from `SessionManager` as a `SharedFlow`
-- [ ] Display live WPM and feedback event in `MainScreen`
-- [ ] Integration test for pipeline (mocked audio source)
+- [x] Create `SessionConfig`, `SessionStats`, `LiveSessionState` models
+- [x] Implement `SpeechCoachSessionManager` wiring `MicrophoneCapture → EnergyBasedVad → VadSpeechSegmenter → RollingWindowPaceEstimator → ThresholdFeedbackDecision`
+- [x] Extend `SessionManager` interface with `liveState: StateFlow<LiveSessionState>`
+- [x] Implement `RECORD_AUDIO` permission request in `MainActivity`
+- [x] Update `MainViewModel` to call `SpeechCoachSessionManager.start()` / `stop()`
+- [x] Expose live WPM and feedback in `MainUiState`
+- [x] Display live WPM, feedback event, and listening indicator in `MainScreen`
+- [x] Unit tests for `SpeechCoachSessionManager` state transitions
 
 ---
 
