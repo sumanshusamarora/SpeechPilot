@@ -1,3 +1,14 @@
+# Android / Gradle build outputs
+.gradle/
+build/
+*/build/
+local.properties
+
+# Android Studio IDE files
+*.iml
+.idea/
+.DS_Store
+
 # Compiled class file
 *.class
 
