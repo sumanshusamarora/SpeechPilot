@@ -24,7 +24,10 @@ class MainViewModel : ViewModel() {
                     current.copy(
                         isSessionActive = live.sessionState == SessionState.Active,
                         isListening = live.isListening,
+                        isSpeechDetected = live.isSpeechDetected,
                         currentWpm = live.currentWpm,
+                        smoothedWpm = live.smoothedWpm,
+                        segmentCount = live.stats.segmentCount,
                         latestFeedback = live.latestFeedback,
                         statusText = when (live.sessionState) {
                             SessionState.Idle ->

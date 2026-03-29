@@ -26,8 +26,12 @@ UI events (e.g. start/stop) into session calls. Does not process audio or make d
 ### `session`
 
 Central orchestrator. Owns the session lifecycle. Connects the audio pipeline:
-`audio → vad → segmentation → pace → feedback`. Exposes `SessionState` as a `StateFlow` consumed
-by `:ui`. Session control (start / stop) is the only entry point into the pipeline.
+`audio → vad → segmentation → pace → feedback`. Exposes `SessionState` and `LiveSessionState`
+as `StateFlow` consumed by `:ui`. Session control (start / stop) is the only entry point into
+the pipeline.
+
+Also maintains session-level summary stats (`SessionStats`) and persists them via
+`SessionRepository` at session end.
 
 ### `audio`
 
@@ -56,13 +60,23 @@ SpeechSegment(frames: List<AudioFrame>, startMs: Long, endMs: Long)
 
 ### `pace`
 
-Accepts `SpeechSegment` objects and maintains a rolling window of pace metrics. Returns
-`PaceMetrics` (words-per-minute estimate, window duration). The rolling window evicts old
-segments outside a configurable time horizon.
+Accepts `SpeechSegment` objects and produces pace metrics. Contains three key components:
+
+1. **`PaceEstimator` interface** — stable contract for segment-level estimation.
+2. **`RollingWindowPaceEstimator`** — maintains a rolling window of recent segments and returns
+   a `PaceMetrics` value on each call to `estimate()`.
+3. **`RollingPaceWindow`** — applies EMA smoothing over sequential `PaceMetrics` observations
+   and tracks session-level peak and average.
 
 ```
-PaceMetrics(wordsPerMinute: Double, syllablesPerSecond: Double, windowDurationMs: Long)
+PaceMetrics(estimatedWpm: Double, windowDurationMs: Long)
 ```
+
+> **Important — approximate signal only:** `estimatedWpm` is a Phase 1 proxy derived from
+> segment count and duration, **not** from word-boundary detection or speech recognition.
+> True WPM measurement requires STT or syllable detection, which are not available in Phase 1.
+> The value should be treated as a relative pace indicator. The `~WPM` label in the UI
+> reflects this approximation.
 
 ### `feedback`
 
@@ -72,8 +86,9 @@ delivery — `:ui` is responsible for rendering the event.
 
 ### `data`
 
-Room database and `SessionRepository`. Records completed sessions (start/end time, average WPM).
-Provides `Flow<List<SessionRecord>>` for history display.
+Defines the `SessionRecord` data class and `SessionRepository` interface. Room schema and
+migrations are not yet wired (Phase 1 preparation only). `SessionRepository` is accepted as
+an optional dependency in `SpeechCoachSessionManager`; if null, sessions are not persisted.
 
 ### `settings`
 
@@ -97,14 +112,54 @@ MicrophoneCapture ──► AudioFrame (Flow)
                    VadSpeechSegmenter ──► SpeechSegment (Flow)
                           │
                           ▼
-                   RollingWindowPaceEstimator ──► PaceMetrics
+                   RollingWindowPaceEstimator ──► PaceMetrics (per window)
+                          │
+                          ▼
+                   RollingPaceWindow ──► smoothed / peak / average WPM
                           │
                           ▼
                    ThresholdFeedbackDecision ──► FeedbackEvent?
                           │
                           ▼
+                   SpeechCoachSessionManager ──► LiveSessionState (StateFlow)
+                          │                      SessionStats (session summary)
+                          ▼
+                   SessionRepository ──► SessionRecord (persistence)
+                          │
+                          ▼
                        UI layer (Compose)
 ```
+
+---
+
+## Live State Exposed to UI
+
+`LiveSessionState` carries:
+
+| Field | Description |
+|---|---|
+| `sessionState` | Current lifecycle state (Idle / Starting / Active / Stopping / Error) |
+| `isListening` | True while audio pipeline is active |
+| `isSpeechDetected` | True once at least one segment has been detected |
+| `currentWpm` | Most recent raw estimated WPM (approximate proxy) |
+| `smoothedWpm` | EMA-smoothed estimated WPM (reduces per-segment noise) |
+| `latestFeedback` | Most recent `FeedbackEvent`, if any |
+| `stats` | Session-level `SessionStats` snapshot |
+
+---
+
+## Session Summary Stats
+
+`SessionStats` accumulates over the session lifetime:
+
+| Field | Description |
+|---|---|
+| `startedAtMs` | Epoch ms when session started |
+| `durationMs` | Total session wall-clock duration |
+| `totalSpeechActiveDurationMs` | Cumulative duration of speech segments |
+| `segmentCount` | Number of speech segments detected |
+| `averageEstimatedWpm` | Mean estimated WPM across all segments |
+| `peakEstimatedWpm` | Highest per-segment estimated WPM observed |
 
 ---
 
@@ -127,21 +182,28 @@ MicrophoneCapture ──► AudioFrame (Flow)
 3. Feedback decision logic (`FeedbackDecision`) is decoupled from feedback rendering.
 4. No global mutable state outside of `DefaultSessionManager`.
 5. Network operations: none. All data stays on-device.
+6. Pace estimation is modular — `PaceEstimator` and `RollingPaceWindow` are independently
+   replaceable without changing the session pipeline.
 
 ---
 
 ## Scope of Phase 1
 
-Phase 1 delivers the module scaffold only:
+Phase 1 delivers a working runtime slice including:
 
 - Module structure with `build.gradle.kts` per module
 - Interfaces and data classes defining the contracts between modules
-- Placeholder implementations (energy VAD, placeholder pace estimator)
-- Unit test skeletons for VAD, pace, feedback, and session
+- Energy-based VAD, segment-based pace estimator, EMA rolling window
+- Session summary stats (start time, duration, speech duration, segment count, avg/peak WPM)
+- Live state exposed to the UI (listening, speech detected, current + smoothed WPM)
+- Persistence model ready (`SessionRecord`, `SessionRepository`) — Room wiring deferred
+- Unit tests for VAD, pace estimation, rolling window, feedback, and session lifecycle
 
 Phase 1 does **not** include:
-- Real word-boundary or syllable detection
+- Real word-boundary or syllable detection (current WPM is a proxy)
 - Room database schema or migrations
 - DataStore wiring
-- UI beyond a placeholder screen
-- Dependency injection
+- Vibration / audio feedback output
+- STT or LLM features
+- Dependency injection framework
+

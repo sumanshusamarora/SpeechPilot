@@ -14,7 +14,7 @@ class ThresholdFeedbackDecision(
         val nowMs = System.currentTimeMillis()
         if (nowMs - lastFeedbackMs < cooldownMs) return null
 
-        val wpm = metrics.wordsPerMinute
+        val wpm = metrics.estimatedWpm
         val lower = targetWpm * (1 - tolerancePct)
         val upper = targetWpm * (1 + tolerancePct)
 

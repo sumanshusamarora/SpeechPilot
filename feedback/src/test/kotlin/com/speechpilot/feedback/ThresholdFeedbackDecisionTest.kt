@@ -17,19 +17,19 @@ class ThresholdFeedbackDecisionTest {
 
     @Test
     fun `wpm above upper bound returns SlowDown`() {
-        val metrics = PaceMetrics(wordsPerMinute = 160.0, syllablesPerSecond = 0.0, windowDurationMs = 1000L)
+        val metrics = PaceMetrics(estimatedWpm = 160.0, windowDurationMs = 1000L)
         assertEquals(FeedbackEvent.SlowDown, decision.evaluate(metrics))
     }
 
     @Test
     fun `wpm below lower bound returns SpeedUp`() {
-        val metrics = PaceMetrics(wordsPerMinute = 80.0, syllablesPerSecond = 0.0, windowDurationMs = 1000L)
+        val metrics = PaceMetrics(estimatedWpm = 80.0, windowDurationMs = 1000L)
         assertEquals(FeedbackEvent.SpeedUp, decision.evaluate(metrics))
     }
 
     @Test
     fun `wpm within tolerance returns OnTarget`() {
-        val metrics = PaceMetrics(wordsPerMinute = 130.0, syllablesPerSecond = 0.0, windowDurationMs = 1000L)
+        val metrics = PaceMetrics(estimatedWpm = 130.0, windowDurationMs = 1000L)
         assertEquals(FeedbackEvent.OnTarget, decision.evaluate(metrics))
     }
 }

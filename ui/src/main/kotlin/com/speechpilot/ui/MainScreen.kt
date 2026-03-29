@@ -54,11 +54,26 @@ private fun MainContent(
             )
         }
 
-        if (state.currentWpm > 0f) {
+        if (state.smoothedWpm > 0f) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "%.0f WPM".format(state.currentWpm),
+                // Label is approximate; shown as "~WPM" to signal estimation
+                text = "~%.0f WPM".format(state.smoothedWpm),
                 style = MaterialTheme.typography.headlineLarge
+            )
+        } else if (state.currentWpm > 0f) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "~%.0f WPM".format(state.currentWpm),
+                style = MaterialTheme.typography.headlineLarge
+            )
+        }
+
+        if (state.segmentCount > 0) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "${state.segmentCount} segment${if (state.segmentCount == 1) "" else "s"}",
+                style = MaterialTheme.typography.bodySmall
             )
         }
 
