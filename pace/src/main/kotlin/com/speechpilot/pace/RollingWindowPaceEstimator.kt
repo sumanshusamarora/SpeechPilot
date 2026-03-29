@@ -46,7 +46,9 @@ class RollingWindowPaceEstimator(
     }
 
     private fun evictOldSegments(nowMs: Long) {
-        while (segmentQueue.isNotEmpty() && nowMs - segmentQueue.peekFirst().startMs > windowMs) {
+        while (segmentQueue.isNotEmpty()) {
+            val oldest = segmentQueue.peekFirst() ?: break
+            if (nowMs - oldest.startMs <= windowMs) break
             segmentQueue.removeFirst()
         }
     }

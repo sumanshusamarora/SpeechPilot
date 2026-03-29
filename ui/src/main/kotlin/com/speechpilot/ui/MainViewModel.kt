@@ -40,7 +40,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // Read initial stored preferences (or defaults if nothing saved yet).
             val prefs: UserPreferences = appSettings.preferences.first()
-            val mgr = SpeechCoachSessionManager(
+            val mgr = SpeechCoachSessionManager.create(
                 feedbackDispatcher = VibrationFeedbackDispatcher(getApplication()),
                 sessionRepository = repository,
                 feedbackDecision = ThresholdFeedbackDecision(
