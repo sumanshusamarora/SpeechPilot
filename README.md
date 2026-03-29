@@ -8,7 +8,7 @@ All processing runs locally on-device. No backend, cloud, or external services r
 
 ## Project Status
 
-🚧 **Iteration 1 — Scaffold** — Module structure and interfaces in place. Feature implementation begins in Iteration 2.
+✅ **Phase 1 — Feature-complete.** Full audio→VAD→segmentation→pace→feedback pipeline running, with local settings and session history persistence, foreground-service background support, and live session UI.
 
 ---
 
@@ -39,12 +39,18 @@ See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full arch
 
 - Android Studio Hedgehog (2023.1.1) or later
 - Android SDK API 26+
-- Java 11+
+- Java 17+
 
-### Build
+### Build (debug)
 
 ```bash
 ./gradlew assembleDebug
+```
+
+### Build (release)
+
+```bash
+./gradlew assembleRelease
 ```
 
 ### Test
@@ -67,7 +73,9 @@ See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full arch
 app
  ├── ui
  │    ├── session
- │    └── feedback
+ │    ├── feedback
+ │    ├── data
+ │    └── settings
  └── session
       ├── audio
       ├── vad
@@ -82,6 +90,22 @@ app
       ├── data
       └── settings
 ```
+
+---
+
+## Releasing
+
+Releases are automated via GitHub Actions. To publish a release APK:
+
+1. Ensure the commit you want to release is on `main`.
+2. Create and push a tag matching the pattern `release-v<major>.<minor>.<patch>`:
+
+```bash
+git tag release-v1.0.0
+git push origin release-v1.0.0
+```
+
+The workflow builds the release APK, creates a GitHub Release, and attaches the APK as an artifact. Release notes are auto-generated from commits since the previous tag.
 
 ---
 
