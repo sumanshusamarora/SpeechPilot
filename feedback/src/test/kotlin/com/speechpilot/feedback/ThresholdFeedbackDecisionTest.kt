@@ -11,8 +11,13 @@ class ThresholdFeedbackDecisionTest {
 
     @Before
     fun setUp() {
-        // Use 0 cooldown so every call can produce feedback
-        decision = ThresholdFeedbackDecision(targetWpm = 130.0, tolerancePct = 0.15, cooldownMs = 0L)
+        // Use 0 cooldown and sustainCount=1 so every call can produce feedback immediately.
+        decision = ThresholdFeedbackDecision(
+            targetWpm = 130.0,
+            tolerancePct = 0.15,
+            cooldownMs = 0L,
+            sustainCount = 1
+        )
     }
 
     @Test

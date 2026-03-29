@@ -13,5 +13,10 @@ data class MainUiState(
     val smoothedWpm: Float = 0f,
     val segmentCount: Int = 0,
     val latestFeedback: FeedbackEvent? = null,
+    /**
+     * True when the most recent feedback event was a coaching alert (SlowDown or SpeedUp).
+     * Resets to false when pace returns to target.
+     */
+    val alertActive: Boolean = false,
     val permissionGranted: Boolean = false
 )

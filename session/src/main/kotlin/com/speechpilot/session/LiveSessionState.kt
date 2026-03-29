@@ -19,5 +19,12 @@ data class LiveSessionState(
     /** EMA-smoothed estimated WPM across recent segments. Reduces per-segment noise. Approximate proxy only. */
     val smoothedWpm: Float = 0f,
     val latestFeedback: FeedbackEvent? = null,
+    /**
+     * True when the most recent feedback event was an alert (SlowDown or SpeedUp).
+     * Resets to false when pace returns to target or on session stop.
+     *
+     * Intended for UI emphasis and is only as precise as the feedback cooldown allows.
+     */
+    val alertActive: Boolean = false,
     val stats: SessionStats = SessionStats()
 )
