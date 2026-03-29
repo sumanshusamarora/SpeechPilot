@@ -54,17 +54,13 @@ private fun MainContent(
             )
         }
 
-        if (state.smoothedWpm > 0f) {
+        // Prefer smoothed WPM once available; fall back to raw current WPM before smoothing kicks in.
+        // The "~" prefix signals this is an approximate proxy, not exact words-per-minute.
+        val displayWpm = if (state.smoothedWpm > 0f) state.smoothedWpm else state.currentWpm
+        if (displayWpm > 0f) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                // Label is approximate; shown as "~WPM" to signal estimation
-                text = "~%.0f WPM".format(state.smoothedWpm),
-                style = MaterialTheme.typography.headlineLarge
-            )
-        } else if (state.currentWpm > 0f) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "~%.0f WPM".format(state.currentWpm),
+                text = "~%.0f WPM".format(displayWpm),
                 style = MaterialTheme.typography.headlineLarge
             )
         }

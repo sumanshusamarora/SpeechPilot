@@ -133,6 +133,8 @@ class SpeechCoachSessionManager(
         val repo = sessionRepository ?: return
         val stats = state.stats
         if (stats.startedAtMs == 0L) return
+        // Capture endedAtMs here (before launching) so it reflects when stop() was called,
+        // not when the persistence coroutine happens to execute.
         val endedAtMs = System.currentTimeMillis()
         managerScope.launch {
             repo.insert(
