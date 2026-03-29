@@ -9,7 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
-import com.speechpilot.ui.MainScreen
+import com.speechpilot.ui.AppNavigation
 import com.speechpilot.ui.MainViewModel
 import com.speechpilot.ui.theme.SpeechPilotTheme
 
@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SpeechPilotTheme {
-                MainScreen(viewModel = viewModel)
+                AppNavigation(mainViewModel = viewModel)
             }
         }
     }

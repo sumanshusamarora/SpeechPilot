@@ -30,6 +30,8 @@ android {
 dependencies {
     implementation(project(":session"))
     implementation(project(":feedback"))
+    implementation(project(":data"))
+    implementation(project(":settings"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
