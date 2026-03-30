@@ -6,7 +6,7 @@ import org.junit.Test
 
 class EnergyBasedVadTest {
 
-    private val vad = EnergyBasedVad(threshold = 300.0)
+    private val vad = EnergyBasedVad(threshold = EnergyBasedVad.DEFAULT_THRESHOLD)
 
     @Test
     fun `silent frame returns Silence`() {
@@ -24,7 +24,7 @@ class EnergyBasedVadTest {
     fun `frame at exact threshold returns Speech`() {
         // Build samples whose RMS equals exactly the threshold.
         // RMS = sqrt(mean(s^2)) = threshold  =>  s = threshold (uniform samples).
-        val sampleValue = 300.toShort()
+        val sampleValue = EnergyBasedVad.DEFAULT_THRESHOLD.toInt().toShort()
         val frame = AudioFrame(ShortArray(512) { sampleValue }, 16_000, 0L)
         assertEquals(VadResult.Speech, vad.detect(frame))
     }
@@ -45,7 +45,7 @@ class EnergyBasedVadTest {
 
     @Test
     fun `default threshold constant matches expected value`() {
-        assertEquals(300.0, EnergyBasedVad.DEFAULT_THRESHOLD, 0.0)
+        assertEquals(750.0, EnergyBasedVad.DEFAULT_THRESHOLD, 0.0)
     }
 
     @Test

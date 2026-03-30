@@ -42,7 +42,7 @@ class VadSpeechSegmenterTest {
 
     @Test
     fun `incomplete silence gap does not prematurely flush segment`() = runTest {
-        // 2 speech, 3 silence (less than MIN_SILENCE_FRAMES=10), 2 more speech, then enough silence
+        // 2 speech, 3 silence (below MIN_SILENCE_FRAMES), 2 more speech, then enough silence
         val silenceCount = VadSpeechSegmenter.MIN_SILENCE_FRAMES
         val (frames, vad) = buildFrames(
             VadResult.Speech, VadResult.Speech,
@@ -141,5 +141,38 @@ class VadSpeechSegmenterTest {
         assertEquals(1, segments.size)
         val segment = segments[0]
         assertEquals(segment.endMs - segment.startMs, segment.durationMs)
+    }
+
+    @Test
+    fun `debug snapshot exposes open segment and silence accumulation`() = runTest {
+        val silenceCount = VadSpeechSegmenter.MIN_SILENCE_FRAMES
+        val (frames, vad) = buildFrames(
+            VadResult.Speech, VadResult.Speech,
+            *Array(silenceCount) { VadResult.Silence }
+        )
+        val segmenter = VadSpeechSegmenter(vad, minSilenceFrames = silenceCount)
+        val snapshots = mutableListOf<SegmentationDebugSnapshot>()
+        segmenter.onDebugSnapshot = { snapshots.add(it) }
+
+        segmenter.segment(frames.asFlow()).toList()
+
+        assertTrue(snapshots.any { it.isSegmentOpen && it.openSegmentFrameCount >= 2 })
+        assertTrue(snapshots.any { it.openSegmentSilenceFrameCount > 0 })
+    }
+
+    @Test
+    fun `debug snapshot finalized segment count increments after flush`() = runTest {
+        val silenceCount = VadSpeechSegmenter.MIN_SILENCE_FRAMES
+        val (frames, vad) = buildFrames(
+            VadResult.Speech, VadResult.Speech,
+            *Array(silenceCount) { VadResult.Silence }
+        )
+        val segmenter = VadSpeechSegmenter(vad, minSilenceFrames = silenceCount)
+        val snapshots = mutableListOf<SegmentationDebugSnapshot>()
+        segmenter.onDebugSnapshot = { snapshots.add(it) }
+
+        segmenter.segment(frames.asFlow()).toList()
+
+        assertEquals(1, snapshots.last().finalizedSegmentsCount)
     }
 }
