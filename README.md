@@ -28,6 +28,7 @@ SpeechPilot is structured as a multi-module Android project. Each module has a s
 | `feedback` | Decisioning and feedback events |
 | `data` | Persistence (Room, repositories) |
 | `settings` | User configuration (DataStore) |
+| `transcription` | Local debug transcription + rolling transcript WPM |
 
 See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full architecture description.
 
@@ -75,7 +76,8 @@ app
  │    ├── session
  │    ├── feedback
  │    ├── data
- │    └── settings
+ │    ├── settings
+ │    └── transcription
  └── session
       ├── audio
       ├── vad
@@ -88,8 +90,25 @@ app
       ├── feedback
       │    └── pace
       ├── data
-      └── settings
+      ├── settings
+      └── transcription
 ```
+
+---
+
+
+### Local transcript debug mode (Phase 1 calibration)
+
+SpeechPilot now includes an **optional local transcript debug mode** for calibration.
+
+- Uses Android `SpeechRecognizer` with offline preference (`EXTRA_PREFER_OFFLINE=true`)
+- Produces incremental transcript text during active sessions
+- Computes a separate rolling **transcript-derived WPM** from finalized recognized words
+- Keeps transcript WPM separate from the existing heuristic est-WPM signal
+- Is disabled by default and can be enabled in **Settings → Local transcript debug**
+
+> Notes: transcript quality/timing depends on on-device speech services and installed language packs.
+> Transcript text is kept in-memory for the current session and is not stored in session history.
 
 ---
 

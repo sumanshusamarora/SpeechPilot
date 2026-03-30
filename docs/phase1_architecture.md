@@ -141,6 +141,22 @@ FeedbackMode:  Vibration                         (Phase 1 only)
 > an approximate proxy (see `pace` module), so feedback events reflect relative pace changes,
 > not absolute speaking rate.
 
+
+### `transcription`
+
+Optional local-only transcript path for developer calibration.
+
+- `LocalTranscriber` is the abstraction for replaceable transcription engines.
+- `AndroidSpeechRecognizerTranscriber` is the Phase 1 implementation (local device recognizer, offline-preferred).
+- `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only.
+
+**Important:** transcript-derived WPM is a separate debug metric and is not used to drive feedback decisions in this phase.
+
+Limitations:
+- Recognition quality and latency vary by device/runtime speech services.
+- Partial hypotheses can be revised; only final hypotheses contribute to transcript WPM.
+- Transcript text is in-memory only for the active session.
+
 ### `data`
 
 Defines the `SessionRecord` data class (Room `@Entity`) and `SessionRepository` interface.
@@ -215,6 +231,8 @@ MicrophoneCapture ──► AudioFrame (Flow)
 | `isSpeechDetected` | True once at least one segment has been detected |
 | `currentWpm` | Most recent raw estimated WPM (syllable-rate proxy) |
 | `smoothedWpm` | EMA-smoothed estimated WPM (reduces per-segment noise) |
+| `transcriptText` | Rolling local transcript debug text (final + current partial preview) |
+| `transcriptRollingWpm` | Rolling transcript-derived WPM from finalized recognized words |
 | `latestFeedback` | Most recent `FeedbackEvent`, if any |
 | `alertActive` | True when the most recent feedback was SlowDown or SpeedUp |
 | `stats` | Session-level `SessionStats` snapshot |
@@ -230,6 +248,7 @@ for real-device calibration. Populated after each segment during an active sessi
 | `targetWpm` | The configured target pace threshold (est-WPM) |
 | `lastDecisionReason` | Outcome of the last feedback evaluation (e.g. `on-target`, `speed-up`, `cooldown-suppressed`) |
 | `isInCooldown` | True when the feedback cooldown window is active |
+| `transcriptionStatus` | Local transcript engine status (`starting`, `listening`, `unavailable`, etc.) |
 
 The debug panel is shown automatically on the main screen while a session is active.
 

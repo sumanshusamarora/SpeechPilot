@@ -12,6 +12,8 @@ import com.speechpilot.session.SessionState
 import com.speechpilot.session.SpeechCoachSessionManager
 import com.speechpilot.settings.DataStoreAppSettings
 import com.speechpilot.settings.UserPreferences
+import com.speechpilot.transcription.AndroidSpeechRecognizerTranscriber
+import com.speechpilot.transcription.NoOpLocalTranscriber
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,17 +31,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
-    // Session manager is initialised once the first settings emission arrives.
-    // DataStore emits immediately from its on-disk cache, so this completes before
-    // a user can realistically tap "Start".
-    // All access to sessionManager is on the main thread (viewModelScope + UI calls),
-    // so no synchronization is needed beyond null-safety checks.
     private var sessionManager: SpeechCoachSessionManager? = null
 
     init {
         viewModelScope.launch {
-            // Read initial stored preferences (or defaults if nothing saved yet).
             val prefs: UserPreferences = appSettings.preferences.first()
+            val transcriber = if (prefs.localTranscriptDebugEnabled) {
+                AndroidSpeechRecognizerTranscriber(getApplication())
+            } else {
+                NoOpLocalTranscriber()
+            }
             val mgr = SpeechCoachSessionManager.create(
                 feedbackDispatcher = VibrationFeedbackDispatcher(getApplication()),
                 sessionRepository = repository,
@@ -47,7 +48,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     targetWpm = prefs.targetWpm.toDouble(),
                     tolerancePct = prefs.tolerancePct.toDouble(),
                     cooldownMs = prefs.feedbackCooldownMs
-                )
+                ),
+                localTranscriber = transcriber
             )
             sessionManager = mgr
             mgr.liveState.collect { live ->
@@ -64,6 +66,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         isSpeechDetected = live.isSpeechDetected,
                         currentWpm = live.currentWpm,
                         smoothedWpm = live.smoothedWpm,
+                        transcriptText = live.transcriptText,
+                        transcriptRollingWpm = live.transcriptRollingWpm,
                         segmentCount = live.stats.segmentCount,
                         latestFeedback = live.latestFeedback,
                         alertActive = live.alertActive,
@@ -100,7 +104,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(errorMessage = "Microphone permission is required to start a session.") }
             return
         }
-        // Clear any previous error before starting.
         _uiState.update { it.copy(errorMessage = null) }
         viewModelScope.launch { mgr.start(mode) }
     }

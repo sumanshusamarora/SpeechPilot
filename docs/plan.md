@@ -105,6 +105,20 @@
 
 ---
 
+
+## Iteration 10 — Local Transcript Debug + Transcript WPM ✅
+
+**Goal:** Add an optional local transcription debug path and text-derived rolling WPM for pace calibration truth-checking.
+
+- [x] Add `:transcription` module with `LocalTranscriber` contract
+- [x] Implement `AndroidSpeechRecognizerTranscriber` (local, offline-preferred)
+- [x] Add `RollingTranscriptWpmCalculator` and deterministic unit tests
+- [x] Integrate optional transcription into `SpeechCoachSessionManager` without breaking existing heuristic pipeline
+- [x] Expose transcript text + transcript-derived rolling WPM in `LiveSessionState`
+- [x] Extend debug panel to compare heuristic pace vs transcript WPM
+- [x] Add settings toggle for transcript debug mode (off by default)
+- [x] Document limits, enablement, and persistence scope
+
 ## Iteration 7 — Polish and QA
 
 **Goal:** Release-candidate quality.

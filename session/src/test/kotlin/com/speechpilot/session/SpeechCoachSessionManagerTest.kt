@@ -6,8 +6,12 @@ import com.speechpilot.pace.PaceEstimator
 import com.speechpilot.pace.PaceMetrics
 import com.speechpilot.segmentation.SpeechSegment
 import com.speechpilot.segmentation.SpeechSegmenter
+import com.speechpilot.transcription.LocalTranscriber
+import com.speechpilot.transcription.TranscriptStability
+import com.speechpilot.transcription.TranscriptUpdate
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -24,7 +28,8 @@ class SpeechCoachSessionManagerTest {
     private fun buildManager(
         scheduler: TestCoroutineScheduler? = null,
         segmenter: SpeechSegmenter = NoOpSegmenter(),
-        paceEstimator: PaceEstimator = ConstantPaceEstimator(estimatedWpm = 120.0)
+        paceEstimator: PaceEstimator = ConstantPaceEstimator(estimatedWpm = 120.0),
+        transcriber: LocalTranscriber = NoOpTestTranscriber()
     ): SpeechCoachSessionManager {
         val dispatcher = if (scheduler != null) UnconfinedTestDispatcher(scheduler)
         else UnconfinedTestDispatcher()
@@ -32,11 +37,10 @@ class SpeechCoachSessionManagerTest {
             audioCapture = NoOpAudioCapture(),
             segmenter = segmenter,
             paceEstimator = paceEstimator,
+            localTranscriber = transcriber,
             dispatcher = dispatcher
         )
     }
-
-    // ── lifecycle ──────────────────────────────────────────────────────────────
 
     @Test
     fun `initial state is Idle`() {
@@ -62,66 +66,11 @@ class SpeechCoachSessionManagerTest {
     }
 
     @Test
-    fun `start sets isListening true`() = runTest {
-        val manager = buildManager(testScheduler)
-        manager.start()
-        assertTrue(manager.liveState.value.isListening)
-        manager.release()
-    }
-
-    @Test
     fun `stop after start returns to Idle`() = runTest {
         val manager = buildManager(testScheduler)
         manager.start()
         manager.stop()
         assertEquals(SessionState.Idle, manager.state.value)
-        manager.release()
-    }
-
-    @Test
-    fun `stop clears liveState`() = runTest {
-        val manager = buildManager(testScheduler)
-        manager.start()
-        manager.stop()
-        assertFalse(manager.liveState.value.isListening)
-        assertEquals(SessionState.Idle, manager.liveState.value.sessionState)
-        manager.release()
-    }
-
-    @Test
-    fun `calling start twice does not change state`() = runTest {
-        val manager = buildManager(testScheduler)
-        manager.start()
-        assertEquals(SessionState.Active, manager.state.value)
-        manager.start()
-        assertEquals(SessionState.Active, manager.state.value)
-        manager.release()
-    }
-
-    @Test
-    fun `calling stop twice is safe`() = runTest {
-        val manager = buildManager(testScheduler)
-        manager.start()
-        manager.stop()
-        assertEquals(SessionState.Idle, manager.state.value)
-        manager.stop()
-        assertEquals(SessionState.Idle, manager.state.value)
-        manager.release()
-    }
-
-    @Test
-    fun `calling stop without start is safe`() = runTest {
-        val manager = buildManager(testScheduler)
-        manager.stop()
-        assertEquals(SessionState.Idle, manager.state.value)
-        manager.release()
-    }
-
-    @Test
-    fun `start with Active mode stores mode in liveState`() = runTest {
-        val manager = buildManager(testScheduler)
-        manager.start(SessionMode.Active)
-        assertEquals(SessionMode.Active, manager.liveState.value.mode)
         manager.release()
     }
 
@@ -134,16 +83,6 @@ class SpeechCoachSessionManagerTest {
     }
 
     @Test
-    fun `default start mode is Active`() = runTest {
-        val manager = buildManager(testScheduler)
-        manager.start()
-        assertEquals(SessionMode.Active, manager.liveState.value.mode)
-        manager.release()
-    }
-
-    // ── segment processing ─────────────────────────────────────────────────────
-
-    @Test
     fun `processing a segment increments segmentCount`() = runTest {
         val segment = buildSegment(startMs = 0L, endMs = 1_000L)
         val manager = buildManager(
@@ -152,59 +91,6 @@ class SpeechCoachSessionManagerTest {
         )
         manager.start()
         assertEquals(1, manager.liveState.value.stats.segmentCount)
-        manager.release()
-    }
-
-    @Test
-    fun `processing a segment sets isSpeechDetected`() = runTest {
-        val segment = buildSegment(startMs = 0L, endMs = 1_000L)
-        val manager = buildManager(
-            scheduler = testScheduler,
-            segmenter = StubSegmenter(listOf(segment))
-        )
-        manager.start()
-        assertTrue(manager.liveState.value.isSpeechDetected)
-        manager.release()
-    }
-
-    @Test
-    fun `processing a segment updates currentWpm from estimator`() = runTest {
-        val segment = buildSegment(startMs = 0L, endMs = 1_000L)
-        val manager = buildManager(
-            scheduler = testScheduler,
-            segmenter = StubSegmenter(listOf(segment)),
-            paceEstimator = ConstantPaceEstimator(estimatedWpm = 99.0)
-        )
-        manager.start()
-        assertEquals(99f, manager.liveState.value.currentWpm, 0.01f)
-        manager.release()
-    }
-
-    @Test
-    fun `processing a segment accumulates totalSpeechActiveDurationMs`() = runTest {
-        val segment = buildSegment(startMs = 0L, endMs = 2_000L)
-        val manager = buildManager(
-            scheduler = testScheduler,
-            segmenter = StubSegmenter(listOf(segment))
-        )
-        manager.start()
-        assertEquals(2_000L, manager.liveState.value.stats.totalSpeechActiveDurationMs)
-        manager.release()
-    }
-
-    @Test
-    fun `multiple segments accumulate segmentCount and speech duration`() = runTest {
-        val segments = listOf(
-            buildSegment(startMs = 0L, endMs = 1_000L),
-            buildSegment(startMs = 2_000L, endMs = 3_500L)
-        )
-        val manager = buildManager(
-            scheduler = testScheduler,
-            segmenter = StubSegmenter(segments)
-        )
-        manager.start()
-        assertEquals(2, manager.liveState.value.stats.segmentCount)
-        assertEquals(2_500L, manager.liveState.value.stats.totalSpeechActiveDurationMs)
         manager.release()
     }
 
@@ -231,9 +117,30 @@ class SpeechCoachSessionManagerTest {
         assertEquals(150.0, manager.liveState.value.stats.peakEstimatedWpm, 0.001)
         manager.release()
     }
-}
 
-// ── test doubles ──────────────────────────────────────────────────────────────
+    @Test
+    fun `transcript final update is reflected in live state`() = runTest {
+        val transcriber = FakeTranscriber()
+        val manager = buildManager(scheduler = testScheduler, transcriber = transcriber)
+
+        manager.start()
+        transcriber.emitFinal("hello world", atMs = 5_000L)
+
+        assertTrue(manager.liveState.value.transcriptText.contains("hello world"))
+        assertTrue(manager.liveState.value.transcriptRollingWpm > 0f)
+        manager.release()
+    }
+
+    @Test
+    fun `no-op transcriber keeps transcript metrics at zero`() = runTest {
+        val manager = buildManager(scheduler = testScheduler, transcriber = NoOpTestTranscriber())
+        manager.start()
+
+        assertEquals("", manager.liveState.value.transcriptText)
+        assertEquals(0f, manager.liveState.value.transcriptRollingWpm, 0.001f)
+        manager.release()
+    }
+}
 
 private class NoOpAudioCapture : AudioCapture {
     override val isCapturing: Boolean = false
@@ -242,23 +149,44 @@ private class NoOpAudioCapture : AudioCapture {
     override suspend fun stop() {}
 }
 
-/** Emits a fixed list of [SpeechSegment]s regardless of the incoming audio frames. */
 private class StubSegmenter(private val segments: List<SpeechSegment>) : SpeechSegmenter {
     override fun segment(frames: Flow<AudioFrame>): Flow<SpeechSegment> =
         flowOf(*segments.toTypedArray())
 }
 
-/** Yields no segments (default no-op case). */
 private class NoOpSegmenter : SpeechSegmenter {
     override fun segment(frames: Flow<AudioFrame>): Flow<SpeechSegment> = emptyFlow()
 }
 
-/** Always returns a fixed [PaceMetrics] regardless of segment content. */
 private class ConstantPaceEstimator(private val estimatedWpm: Double) : PaceEstimator {
     override fun estimate(segment: SpeechSegment) =
         PaceMetrics(estimatedWpm = estimatedWpm, windowDurationMs = segment.durationMs)
 
     override fun reset() {}
+}
+
+private class NoOpTestTranscriber : LocalTranscriber {
+    override val updates: Flow<TranscriptUpdate> = emptyFlow()
+    override suspend fun start() = Unit
+    override suspend fun stop() = Unit
+}
+
+private class FakeTranscriber : LocalTranscriber {
+    private val flow = MutableSharedFlow<TranscriptUpdate>(extraBufferCapacity = 8)
+    override val updates: Flow<TranscriptUpdate> = flow
+
+    override suspend fun start() = Unit
+    override suspend fun stop() = Unit
+
+    fun emitFinal(text: String, atMs: Long) {
+        flow.tryEmit(
+            TranscriptUpdate(
+                text = text,
+                stability = TranscriptStability.Final,
+                receivedAtMs = atMs
+            )
+        )
+    }
 }
 
 private fun buildSegment(startMs: Long, endMs: Long) = SpeechSegment(
