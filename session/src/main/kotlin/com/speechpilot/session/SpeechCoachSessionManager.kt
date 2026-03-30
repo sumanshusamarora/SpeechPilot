@@ -2,6 +2,7 @@ package com.speechpilot.session
 
 import com.speechpilot.audio.AudioCapture
 import com.speechpilot.audio.AudioFrame
+import com.speechpilot.audio.FileAudioCapture
 import com.speechpilot.audio.MicrophoneCapture
 import com.speechpilot.data.SessionRecord
 import com.speechpilot.data.SessionRepository
@@ -19,6 +20,8 @@ import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RollingTranscriptWpmCalculator
 import com.speechpilot.transcription.TranscriptionEngineStatus
 import com.speechpilot.vad.EnergyBasedVad
+import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +40,9 @@ import kotlin.math.sqrt
 
 /**
  * Central coordinator for the speech coaching session lifecycle.
+ *
+ * @param audioFileUri Non-null for file-based sessions. Stored in the persisted [SessionRecord]
+ *   so the file can be re-analyzed from session history.
  */
 class SpeechCoachSessionManager(
     private val audioCapture: AudioCapture = MicrophoneCapture(),
@@ -48,6 +54,7 @@ class SpeechCoachSessionManager(
     private val transcriptWpmCalculator: RollingTranscriptWpmCalculator = RollingTranscriptWpmCalculator(),
     private val feedbackDispatcher: FeedbackDispatcher? = null,
     private val sessionRepository: SessionRepository? = null,
+    private val audioFileUri: String? = null,
     dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : SessionManager {
 
@@ -161,6 +168,20 @@ class SpeechCoachSessionManager(
                 localTranscriber.stop()
                 audioCapture.stop()
             }
+
+            // Auto-finalize when the audio source is exhausted naturally (e.g. file sessions
+            // where the flow completes once all frames are emitted). This path is not reached
+            // on CancellationException — stop() handles that path instead.
+            if (_state.value == SessionState.Active) {
+                val finalLiveState = _liveState.value
+                _state.value = SessionState.Stopping
+                persistSessionSummary(finalLiveState)
+                paceEstimator.reset()
+                rollingPaceWindow.reset()
+                transcriptWpmCalculator.reset()
+                _liveState.value = LiveSessionState(sessionState = SessionState.Idle)
+                _state.value = SessionState.Idle
+            }
         }
     }
 
@@ -206,12 +227,40 @@ class SpeechCoachSessionManager(
             feedbackDecision = feedbackDecision,
             localTranscriber = localTranscriber
         )
+
+        /**
+         * Creates a [SpeechCoachSessionManager] that analyses a pre-recorded audio file instead
+         * of the live microphone.
+         *
+         * The [audioFileUri] is persisted in [SessionRecord] so the file can be re-analysed from
+         * session history. The session auto-finalizes when the file is fully processed.
+         *
+         * Requires read access to [audioFileUri] via the content resolver. If the file was
+         * selected via [android.content.Intent.ACTION_OPEN_DOCUMENT], take a persistable URI
+         * permission before calling this factory so that re-analysis from history works across
+         * app restarts.
+         */
+        fun createForFile(
+            context: Context,
+            audioFileUri: Uri,
+            feedbackDispatcher: FeedbackDispatcher? = null,
+            sessionRepository: SessionRepository? = null,
+            feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
+            localTranscriber: LocalTranscriber = NoOpLocalTranscriber()
+        ): SpeechCoachSessionManager = SpeechCoachSessionManager(
+            audioCapture = FileAudioCapture(context, audioFileUri),
+            feedbackDispatcher = feedbackDispatcher,
+            sessionRepository = sessionRepository,
+            feedbackDecision = feedbackDecision,
+            localTranscriber = localTranscriber,
+            audioFileUri = audioFileUri.toString()
+        )
     }
 
     private fun computeFrameRms(samples: ShortArray): Double {
         if (samples.isEmpty()) return 0.0
         var sum = 0.0
-        for (s in samples) sum += s.toLong() * s
+        for (s in samples) sum += s.toDouble() * s
         return sqrt(sum / samples.size)
     }
 
@@ -257,7 +306,8 @@ class SpeechCoachSessionManager(
                     totalSpeechActiveDurationMs = stats.totalSpeechActiveDurationMs,
                     segmentCount = stats.segmentCount,
                     averageEstimatedWpm = stats.averageEstimatedWpm,
-                    peakEstimatedWpm = stats.peakEstimatedWpm
+                    peakEstimatedWpm = stats.peakEstimatedWpm,
+                    audioFileUri = audioFileUri
                 )
             )
         }

@@ -39,16 +39,18 @@ import java.util.concurrent.TimeUnit
 @Composable
 fun HistoryScreen(
     viewModel: HistoryViewModel = viewModel(),
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onReanalyze: (String) -> Unit = {}
 ) {
     val sessions by viewModel.sessions.collectAsState()
-    HistoryContent(sessions = sessions, onBack = onBack)
+    HistoryContent(sessions = sessions, onBack = onBack, onReanalyze = onReanalyze)
 }
 
 @Composable
 private fun HistoryContent(
     sessions: List<SessionRecord>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onReanalyze: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -97,7 +99,12 @@ private fun HistoryContent(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(sessions) { record ->
-                    SessionSummaryCard(record = record)
+                    SessionSummaryCard(
+                        record = record,
+                        onReanalyze = record.audioFileUri?.let { uri ->
+                            { onReanalyze(uri) }
+                        }
+                    )
                 }
             }
         }
@@ -105,17 +112,33 @@ private fun HistoryContent(
 }
 
 @Composable
-private fun SessionSummaryCard(record: SessionRecord) {
+private fun SessionSummaryCard(
+    record: SessionRecord,
+    onReanalyze: (() -> Unit)? = null
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Text(
-                text = formatTimestamp(record.startedAtMs),
-                style = MaterialTheme.typography.titleSmall
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = formatTimestamp(record.startedAtMs),
+                    style = MaterialTheme.typography.titleSmall
+                )
+                if (record.audioFileUri != null) {
+                    Text(
+                        text = "File analysis",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(6.dp))
             HorizontalDivider()
             Spacer(modifier = Modifier.height(6.dp))
@@ -124,6 +147,13 @@ private fun SessionSummaryCard(record: SessionRecord) {
             SummaryRow("Segments", "${record.segmentCount}")
             SummaryRow("Avg ~WPM", "~%.0f".format(record.averageEstimatedWpm))
             SummaryRow("Peak ~WPM", "~%.0f".format(record.peakEstimatedWpm))
+            if (onReanalyze != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                FilledTonalButton(
+                    onClick = onReanalyze,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Re-analyze") }
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.speechpilot.ui
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,6 +21,9 @@ private enum class AppScreen { MAIN, SETTINGS, HISTORY }
  *
  * [BackHandler] intercepts the system back gesture/button whenever a sub-screen
  * is active, returning the user to the main screen instead of exiting the app.
+ *
+ * "Re-analyze" from history navigates back to main and starts a file session on the
+ * shared [MainViewModel] so results are immediately visible.
  */
 @Composable
 fun AppNavigation(
@@ -46,7 +50,11 @@ fun AppNavigation(
         )
         AppScreen.HISTORY -> HistoryScreen(
             viewModel = historyViewModel,
-            onBack = { currentScreen = AppScreen.MAIN }
+            onBack = { currentScreen = AppScreen.MAIN },
+            onReanalyze = { uriString ->
+                currentScreen = AppScreen.MAIN
+                mainViewModel.startFileSession(Uri.parse(uriString))
+            }
         )
     }
 }

@@ -34,9 +34,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.speechpilot.feedback.FeedbackEvent
 import com.speechpilot.session.SessionMode
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun MainScreen(
@@ -45,11 +48,31 @@ fun MainScreen(
     onOpenHistory: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    // File picker: audio/* MIME type, takes persistable read permission so history re-analysis
+    // works after an app restart.
+    val fileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) {
+                // Some providers do not grant persistable permissions; continue anyway.
+            }
+            viewModel.startFileSession(it)
+        }
+    }
+
     MainContent(
         state = state,
         onStartSession = viewModel::startSession,
         onStopSession = viewModel::stopSession,
         onDismissError = viewModel::dismissError,
+        onAnalyzeFile = { fileLauncher.launch(arrayOf("audio/*")) },
         onOpenSettings = onOpenSettings,
         onOpenHistory = onOpenHistory
     )
@@ -61,6 +84,7 @@ private fun MainContent(
     onStartSession: () -> Unit,
     onStopSession: () -> Unit,
     onDismissError: () -> Unit,
+    onAnalyzeFile: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit
 ) {
@@ -118,6 +142,7 @@ private fun MainContent(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = when {
+                        state.isFileSession && state.isSessionActive -> "Processing uploaded audio file"
                         state.isSpeechActive -> "Speaking now"
                         state.isListening && state.isSpeechDetected -> "Speech detected this session"
                         state.isListening -> "Waiting for speech…"
@@ -194,19 +219,29 @@ private fun MainContent(
         when {
             !state.permissionGranted -> {
                 Text(
-                    text = "Microphone permission required to start a session.",
+                    text = "Microphone permission required to start a live session.",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                FilledTonalButton(
+                    onClick = onAnalyzeFile,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Analyze Audio File") }
             }
             state.isSessionActive -> {
                 Button(onClick = onStopSession, modifier = Modifier.fillMaxWidth()) {
-                    Text("Stop Session")
+                    Text(if (state.isFileSession) "Stop Analysis" else "Stop Session")
                 }
             }
             else -> {
                 Button(onClick = onStartSession, modifier = Modifier.fillMaxWidth()) {
                     Text("Start Session")
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                FilledTonalButton(
+                    onClick = onAnalyzeFile,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Analyze Audio File") }
             }
         }
         Spacer(modifier = Modifier.height(12.dp))

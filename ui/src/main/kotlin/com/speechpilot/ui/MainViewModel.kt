@@ -1,6 +1,7 @@
 package com.speechpilot.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.speechpilot.data.RoomSessionRepository
@@ -68,7 +69,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             localTranscriber = transcriber
         )
         sessionManager = mgr
+        startWatchingLiveState(mgr, isFileSession = false, fileSessionUri = null)
+    }
 
+    private fun recreateFileSessionManager(prefs: UserPreferences, uri: Uri) {
+        liveStateJob?.cancel()
+        sessionManager?.release()
+
+        val mgr = SpeechCoachSessionManager.createForFile(
+            context = getApplication(),
+            audioFileUri = uri,
+            feedbackDispatcher = VibrationFeedbackDispatcher(getApplication()),
+            sessionRepository = repository,
+            feedbackDecision = ThresholdFeedbackDecision(
+                targetWpm = prefs.targetWpm.toDouble(),
+                tolerancePct = prefs.tolerancePct.toDouble(),
+                cooldownMs = prefs.feedbackCooldownMs
+            )
+        )
+        sessionManager = mgr
+        startWatchingLiveState(mgr, isFileSession = true, fileSessionUri = uri.toString())
+    }
+
+    /**
+     * Subscribes to [mgr]'s live state and maps it to [MainUiState].
+     *
+     * [isFileSession] controls the status text wording and is stored in [MainUiState] so the
+     * UI can show the appropriate controls.
+     */
+    private fun startWatchingLiveState(
+        mgr: SpeechCoachSessionManager,
+        isFileSession: Boolean,
+        fileSessionUri: String?
+    ) {
         liveStateJob = viewModelScope.launch {
             mgr.liveState.collect { live ->
                 _uiState.update { current ->
@@ -94,12 +127,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         sessionMode = live.mode,
                         errorMessage = errorMessage,
                         debugInfo = live.debugInfo,
+                        isFileSession = isFileSession,
+                        fileSessionUri = fileSessionUri,
                         statusText = when (live.sessionState) {
                             SessionState.Idle ->
                                 if (current.permissionGranted) "Ready" else "Microphone permission required"
                             SessionState.Starting -> "Starting…"
                             SessionState.Active ->
-                                if (live.isSpeechActive) "Speaking…" else "Listening…"
+                                if (isFileSession) "Analyzing file…"
+                                else if (live.isSpeechActive) "Speaking…" else "Listening…"
                             SessionState.Stopping -> "Stopping…"
                             is SessionState.Error -> "Session error"
                         }
@@ -131,6 +167,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(errorMessage = null) }
         val mgr = sessionManager ?: return
         viewModelScope.launch { mgr.start(mode) }
+    }
+
+    /**
+     * Starts a session that analyses an uploaded audio file instead of the live microphone.
+     *
+     * The [uri] must be readable by the content resolver. For documents selected via
+     * [android.content.Intent.ACTION_OPEN_DOCUMENT], take a persistable URI permission before
+     * calling this so that re-analysis from history works after an app restart.
+     *
+     * Does not require the `RECORD_AUDIO` permission.
+     */
+    fun startFileSession(uri: Uri) {
+        _uiState.update { it.copy(errorMessage = null) }
+        recreateFileSessionManager(latestPreferences, uri)
+        val mgr = sessionManager ?: return
+        viewModelScope.launch { mgr.start() }
     }
 
     fun stopSession() {
