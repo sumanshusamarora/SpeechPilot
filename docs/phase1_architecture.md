@@ -86,7 +86,8 @@ Accepts `SpeechSegment` objects and produces pace metrics. Contains three key co
 
 1. **`PaceEstimator` interface** — stable contract for segment-level estimation.
 2. **`RollingWindowPaceEstimator`** — maintains a rolling window of recent segments and returns
-   a `PaceMetrics` value on each call to `estimate()`.
+   a `PaceMetrics` value on each call to `estimate()`. Uses syllable-peak detection to measure
+   speaking pace (see below).
 3. **`RollingPaceWindow`** — applies EMA smoothing over sequential `PaceMetrics` observations
    and tracks session-level peak and average.
 
@@ -94,11 +95,23 @@ Accepts `SpeechSegment` objects and produces pace metrics. Contains three key co
 PaceMetrics(estimatedWpm: Double, windowDurationMs: Long)
 ```
 
-> **Important — approximate signal only:** `estimatedWpm` is a Phase 1 proxy derived from
-> segment count and duration, **not** from word-boundary detection or speech recognition.
-> True WPM measurement requires STT or syllable detection, which are not available in Phase 1.
-> The value should be treated as a relative pace indicator. The `~WPM` label in the UI
-> reflects this approximation.
+> **Important — syllable-rate proxy, not true WPM:** `estimatedWpm` is derived by detecting
+> energy-envelope peaks (syllable nuclei) in each segment's audio frames, then dividing the
+> syllable rate by an average English syllables-per-word constant (1.5). This gives a
+> **correctly-directional** relative pace signal: faster speech produces more syllable peaks
+> per second, yielding a higher `estimatedWpm`; slower speech yields a lower value.
+>
+> **Signal direction is correct and validated:** unit tests using synthetic audio at known
+> syllable rates (2 syl/s = slow, 5 syl/s = fast) confirm that fast speech always produces
+> higher `estimatedWpm` than slow speech. See `AudioPaceValidationTest`.
+>
+> **This is not a calibrated WPM reading.** Absolute values depend on audio quality, speaker
+> characteristics, and frame size. The `~WPM` label in the UI reflects this approximation.
+> Do not compare absolute values across devices or sessions without recalibration.
+>
+> **Previous bug (now fixed):** Before this correction, the estimator counted speech segments
+> instead of syllables. This caused signal inversion: slow speech (many short segments) reported
+> higher pace than fast speech (fewer, longer segments). The syllable-rate approach corrects this.
 
 ### `feedback`
 
@@ -200,11 +213,25 @@ MicrophoneCapture ──► AudioFrame (Flow)
 | `mode` | Operational mode of the session (`Active` or `Passive`) |
 | `isListening` | True while audio pipeline is active |
 | `isSpeechDetected` | True once at least one segment has been detected |
-| `currentWpm` | Most recent raw estimated WPM (approximate proxy) |
+| `currentWpm` | Most recent raw estimated WPM (syllable-rate proxy) |
 | `smoothedWpm` | EMA-smoothed estimated WPM (reduces per-segment noise) |
 | `latestFeedback` | Most recent `FeedbackEvent`, if any |
 | `alertActive` | True when the most recent feedback was SlowDown or SpeedUp |
 | `stats` | Session-level `SessionStats` snapshot |
+| `debugInfo` | `DebugPipelineInfo` — lightweight debug snapshot (see below) |
+
+### Debug Pipeline Info
+
+`DebugPipelineInfo` (inside `LiveSessionState.debugInfo`) exposes internal pipeline state
+for real-device calibration. Populated after each segment during an active session.
+
+| Field | Description |
+|---|---|
+| `targetWpm` | The configured target pace threshold (est-WPM) |
+| `lastDecisionReason` | Outcome of the last feedback evaluation (e.g. `on-target`, `speed-up`, `cooldown-suppressed`) |
+| `isInCooldown` | True when the feedback cooldown window is active |
+
+The debug panel is shown automatically on the main screen while a session is active.
 
 ---
 
@@ -307,9 +334,9 @@ Phase 1 delivers a working runtime slice including:
 
 - Module structure with `build.gradle.kts` per module
 - Interfaces and data classes defining the contracts between modules
-- Energy-based VAD, segment-based pace estimator, EMA rolling window
+- Energy-based VAD, syllable-rate pace estimator (corrected signal direction), EMA rolling window
 - Session summary stats (start time, duration, speech duration, segment count, avg/peak WPM)
-- Live state exposed to the UI (listening, speech detected, current + smoothed WPM, alertActive, mode)
+- Live state exposed to the UI (listening, speech detected, current + smoothed WPM, alertActive, mode, debug info)
 - Feedback decisioning: threshold, cooldown, and sustain/debounce logic (`ThresholdFeedbackDecision`)
 - Vibration feedback output (`VibrationFeedbackDispatcher`) behind the `FeedbackDispatcher` abstraction
 - Room-backed session summary persistence (`RoomSessionRepository`, `SpeechPilotDatabase`)
@@ -321,10 +348,11 @@ Phase 1 delivers a working runtime slice including:
 - `SessionMode` enum (`Active` / `Passive`) as foundation for passive-mode work
 - Guarded `start()`/`stop()` lifecycle (idempotent, safe no-ops on invalid transitions)
 - Improved live session UI (speech-detected indicator, error display, passive-mode badge)
-- Unit tests for VAD, pace estimation, rolling window, feedback (threshold, cooldown, sustain, invalid-pace), session lifecycle, session mode, and data/settings models
+- Debug panel on main screen showing pipeline internals (pace signal, threshold, cooldown, decision reason)
+- Unit tests for VAD, pace estimation (including syllable-rate Fast vs Slow validation), rolling window, feedback (threshold, cooldown, sustain, invalid-pace), session lifecycle, session mode, and data/settings models
 
 Phase 1 does **not** include:
-- Real word-boundary or syllable detection (current WPM is a proxy)
+- True word-boundary or syllable detection via STT (current WPM is a syllable-rate energy proxy)
 - Room database migrations (version 1 only in Phase 1)
 - Tone / audio feedback output (vibration only in Phase 1)
 - STT or LLM features
@@ -332,4 +360,5 @@ Phase 1 does **not** include:
 - Settings changes applied to a running session (changes take effect on next session start)
 - Session recovery after process death
 - True always-on background listening daemon
+- Adaptive or personalized pace calibration
 

@@ -44,13 +44,35 @@ class ThresholdFeedbackDecision(
      */
     private var consecutiveFastCount: Int = 0
 
+    /**
+     * Human-readable description of the most recent decision outcome.
+     * Updated on every call to [evaluate]. Useful for debug surfaces and test assertions.
+     */
+    var lastDecisionReason: String = "none"
+        private set
+
+    /** Returns the configured target pace used for threshold comparison. */
+    fun currentTargetWpm(): Double = targetWpm
+
+    /**
+     * Returns true if the cooldown window is currently active (i.e. the minimum
+     * inter-alert interval has not yet elapsed since the last feedback event).
+     */
+    fun isCooldownActive(): Boolean = (clock() - lastFeedbackMs) < cooldownMs
+
     override fun evaluate(metrics: PaceMetrics): FeedbackEvent? {
         // Guard: do not produce feedback for an invalid or missing pace signal.
-        if (metrics.estimatedWpm <= 0.0) return null
+        if (metrics.estimatedWpm <= 0.0) {
+            lastDecisionReason = "invalid-signal"
+            return null
+        }
 
         // Guard: suppress feedback if we are still inside the cooldown window.
         val nowMs = clock()
-        if (nowMs - lastFeedbackMs < cooldownMs) return null
+        if (nowMs - lastFeedbackMs < cooldownMs) {
+            lastDecisionReason = "cooldown-suppressed"
+            return null
+        }
 
         val wpm = metrics.estimatedWpm
         val lower = targetWpm * (1 - tolerancePct)
@@ -63,20 +85,26 @@ class ThresholdFeedbackDecision(
                     // Sustained over-threshold pace — fire the alert.
                     consecutiveFastCount = 0
                     lastFeedbackMs = nowMs
+                    lastDecisionReason = "slow-down"
                     FeedbackEvent.SlowDown
                 } else {
                     // Not yet sustained enough — wait for more evidence.
+                    lastDecisionReason = "debouncing($consecutiveFastCount/$sustainCount)"
                     null
                 }
             }
             wpm < lower -> {
                 consecutiveFastCount = 0
                 lastFeedbackMs = nowMs
+                lastDecisionReason = "speed-up"
                 FeedbackEvent.SpeedUp
             }
             else -> {
+                // On-target: reset sustain counter but do NOT update lastFeedbackMs.
+                // Cooldown guards against corrective-alert spam; neutral state must not
+                // reset the timer and inadvertently suppress a subsequent real alert.
                 consecutiveFastCount = 0
-                lastFeedbackMs = nowMs
+                lastDecisionReason = "on-target"
                 FeedbackEvent.OnTarget
             }
         }

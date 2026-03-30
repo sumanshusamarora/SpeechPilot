@@ -1,6 +1,7 @@
 package com.speechpilot.ui
 
 import com.speechpilot.feedback.FeedbackEvent
+import com.speechpilot.session.DebugPipelineInfo
 import com.speechpilot.session.SessionMode
 
 data class MainUiState(
@@ -23,5 +24,7 @@ data class MainUiState(
     /** Non-null when the session has encountered a runtime error. Cleared on next session start. */
     val errorMessage: String? = null,
     /** Operational mode of the current or most recently completed session. */
-    val sessionMode: SessionMode = SessionMode.Active
+    val sessionMode: SessionMode = SessionMode.Active,
+    /** Live debug snapshot for pipeline calibration. Populated during an active session. */
+    val debugInfo: DebugPipelineInfo = DebugPipelineInfo()
 )
