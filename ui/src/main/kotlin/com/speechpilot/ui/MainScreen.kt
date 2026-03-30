@@ -199,11 +199,11 @@ private fun DebugPanel(state: MainUiState) {
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         val speechLabel = when {
-            state.isSpeechDetected -> "yes"
-            state.isListening -> "listening, none yet"
+            state.isSpeechDetected -> "yes (this session)"
+            state.isListening -> "none yet"
             else -> "no"
         }
-        DebugRow(label = "Speech active", value = speechLabel)
+        DebugRow(label = "Speech seen", value = speechLabel)
         DebugRow(label = "Raw pace", value = "%.1f est-WPM".format(state.currentWpm))
         DebugRow(label = "Smoothed pace", value = "%.1f est-WPM".format(state.smoothedWpm))
         DebugRow(label = "Target", value = "%.0f est-WPM".format(debug.targetWpm))

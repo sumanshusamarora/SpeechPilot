@@ -100,8 +100,10 @@ class ThresholdFeedbackDecision(
                 FeedbackEvent.SpeedUp
             }
             else -> {
+                // On-target: reset sustain counter but do NOT update lastFeedbackMs.
+                // Cooldown guards against corrective-alert spam; neutral state must not
+                // reset the timer and inadvertently suppress a subsequent real alert.
                 consecutiveFastCount = 0
-                lastFeedbackMs = nowMs
                 lastDecisionReason = "on-target"
                 FeedbackEvent.OnTarget
             }

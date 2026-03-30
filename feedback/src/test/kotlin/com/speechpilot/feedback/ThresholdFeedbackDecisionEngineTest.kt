@@ -56,6 +56,32 @@ class ThresholdFeedbackDecisionEngineTest {
         assertEquals(FeedbackEvent.SpeedUp, afterCooldown)
     }
 
+    @Test
+    fun `OnTarget during cooldown does not reset the cooldown timer`() {
+        var fakeTime = 0L
+        val decision = buildDecision(cooldownMs = 5_000L, sustainCount = 1, clock = { fakeTime })
+
+        // First corrective alert — starts cooldown at t=0
+        val first = decision.evaluate(PaceMetrics(estimatedWpm = 80.0, windowDurationMs = 1000L))
+        assertEquals(FeedbackEvent.SpeedUp, first)
+
+        // On-target observation within the cooldown window — must NOT reset lastFeedbackMs
+        fakeTime = 2_000L
+        val onTarget = decision.evaluate(PaceMetrics(estimatedWpm = 130.0, windowDurationMs = 1000L))
+        assertEquals(FeedbackEvent.OnTarget, onTarget)
+
+        // Another corrective event at t=3000 — still within the original 5s cooldown from t=0,
+        // so the alert must still be suppressed (OnTarget at t=2000 didn't reset the timer).
+        fakeTime = 3_000L
+        val suppressed = decision.evaluate(PaceMetrics(estimatedWpm = 80.0, windowDurationMs = 1000L))
+        assertNull("Expected null — cooldown should not have been reset by OnTarget", suppressed)
+
+        // After the original 5s cooldown expires from t=0, the alert should fire again
+        fakeTime = 6_000L
+        val afterCooldown = decision.evaluate(PaceMetrics(estimatedWpm = 80.0, windowDurationMs = 1000L))
+        assertEquals(FeedbackEvent.SpeedUp, afterCooldown)
+    }
+
     // ── sustain / debounce for SlowDown ───────────────────────────────────────
 
     @Test
