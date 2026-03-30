@@ -13,6 +13,10 @@ data class MainUiState(
     val currentWpm: Float = 0f,
     /** EMA-smoothed estimated WPM. Approximate proxy — not exact WPM. */
     val smoothedWpm: Float = 0f,
+    /** Rolling transcript text from local debug transcription. */
+    val transcriptText: String = "",
+    /** Rolling WPM derived from finalized transcript words. */
+    val transcriptRollingWpm: Float = 0f,
     val segmentCount: Int = 0,
     val latestFeedback: FeedbackEvent? = null,
     /**

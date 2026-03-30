@@ -1,0 +1,16 @@
+package com.speechpilot.transcription
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+
+class NoOpLocalTranscriber : LocalTranscriber {
+    override val updates: Flow<TranscriptUpdate> = emptyFlow()
+    override val status: StateFlow<TranscriptionEngineStatus> =
+        MutableStateFlow(TranscriptionEngineStatus.Disabled)
+
+    override suspend fun start() = Unit
+
+    override suspend fun stop() = Unit
+}

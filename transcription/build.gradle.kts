@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.speechpilot.session"
+    namespace = "com.speechpilot.transcription"
     compileSdk = 35
 
     defaultConfig {
@@ -23,20 +23,9 @@ android {
 }
 
 dependencies {
-    implementation(project(":audio"))
-    implementation(project(":vad"))
-    implementation(project(":segmentation"))
-    implementation(project(":pace"))
-    implementation(project(":feedback"))
-    implementation(project(":data"))
-    implementation(project(":settings"))
-    implementation(project(":transcription"))
-
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
-    androidTestImplementation(libs.androidx.junit)
 }

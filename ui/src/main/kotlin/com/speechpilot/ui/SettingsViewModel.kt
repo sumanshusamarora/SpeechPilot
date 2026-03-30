@@ -38,4 +38,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             appSettings.update(preferences.value.copy(feedbackCooldownMs = ms))
         }
     }
+
+    fun updateLocalTranscriptDebugEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettings.update(preferences.value.copy(localTranscriptDebugEnabled = enabled))
+        }
+    }
 }

@@ -32,6 +32,7 @@ dependencies {
     implementation(project(":feedback"))
     implementation(project(":data"))
     implementation(project(":settings"))
+    implementation(project(":transcription"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)

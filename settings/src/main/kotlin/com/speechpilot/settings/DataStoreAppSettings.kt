@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -42,7 +43,8 @@ class DataStoreAppSettings(context: Context) : AppSettings {
                 targetWpm = store[Keys.TARGET_WPM] ?: defaults.targetWpm,
                 tolerancePct = store[Keys.TOLERANCE_PCT] ?: defaults.tolerancePct,
                 feedbackCooldownMs = store[Keys.FEEDBACK_COOLDOWN_MS] ?: defaults.feedbackCooldownMs,
-                micSampleRate = store[Keys.MIC_SAMPLE_RATE] ?: defaults.micSampleRate
+                micSampleRate = store[Keys.MIC_SAMPLE_RATE] ?: defaults.micSampleRate,
+                localTranscriptDebugEnabled = store[Keys.LOCAL_TRANSCRIPT_DEBUG_ENABLED] ?: defaults.localTranscriptDebugEnabled
             )
         }
 
@@ -52,6 +54,7 @@ class DataStoreAppSettings(context: Context) : AppSettings {
             store[Keys.TOLERANCE_PCT] = prefs.tolerancePct
             store[Keys.FEEDBACK_COOLDOWN_MS] = prefs.feedbackCooldownMs
             store[Keys.MIC_SAMPLE_RATE] = prefs.micSampleRate
+            store[Keys.LOCAL_TRANSCRIPT_DEBUG_ENABLED] = prefs.localTranscriptDebugEnabled
         }
     }
 
@@ -60,5 +63,6 @@ class DataStoreAppSettings(context: Context) : AppSettings {
         val TOLERANCE_PCT = floatPreferencesKey("tolerance_pct")
         val FEEDBACK_COOLDOWN_MS = longPreferencesKey("feedback_cooldown_ms")
         val MIC_SAMPLE_RATE = intPreferencesKey("mic_sample_rate")
+        val LOCAL_TRANSCRIPT_DEBUG_ENABLED = booleanPreferencesKey("local_transcript_debug_enabled")
     }
 }

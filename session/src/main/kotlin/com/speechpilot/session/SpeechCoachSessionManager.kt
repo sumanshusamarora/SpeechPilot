@@ -13,6 +13,10 @@ import com.speechpilot.pace.RollingPaceWindow
 import com.speechpilot.pace.RollingWindowPaceEstimator
 import com.speechpilot.segmentation.SpeechSegmenter
 import com.speechpilot.segmentation.VadSpeechSegmenter
+import com.speechpilot.transcription.LocalTranscriber
+import com.speechpilot.transcription.NoOpLocalTranscriber
+import com.speechpilot.transcription.RollingTranscriptWpmCalculator
+import com.speechpilot.transcription.TranscriptionEngineStatus
 import com.speechpilot.vad.EnergyBasedVad
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -29,16 +33,6 @@ import kotlinx.coroutines.launch
 
 /**
  * Central coordinator for the speech coaching session lifecycle.
- *
- * Wires the audio capture → segmentation → pace → feedback pipeline
- * and exposes observable [liveState] for the UI layer.
- *
- * @param segmenter Speech segmenter used to convert audio frames into speech segments.
- *   Defaults to [VadSpeechSegmenter] with energy-based VAD. Swap to inject a stub in tests.
- * @param feedbackDispatcher Optional dispatcher that executes feedback events (e.g. vibration).
- *   If null, feedback events are evaluated and stored in live state but not dispatched externally.
- * @param sessionRepository Optional repository for persisting session summaries.
- *   If null, sessions are not persisted (safe to omit until Room wiring is complete).
  */
 class SpeechCoachSessionManager(
     private val audioCapture: AudioCapture = MicrophoneCapture(),
@@ -46,6 +40,8 @@ class SpeechCoachSessionManager(
     private val paceEstimator: PaceEstimator = RollingWindowPaceEstimator(),
     private val rollingPaceWindow: RollingPaceWindow = RollingPaceWindow(),
     private val feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
+    private val localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
+    private val transcriptWpmCalculator: RollingTranscriptWpmCalculator = RollingTranscriptWpmCalculator(),
     private val feedbackDispatcher: FeedbackDispatcher? = null,
     private val sessionRepository: SessionRepository? = null,
     dispatcher: CoroutineDispatcher = Dispatchers.Default
@@ -59,9 +55,9 @@ class SpeechCoachSessionManager(
 
     private val managerScope = CoroutineScope(SupervisorJob() + dispatcher)
     private var pipelineJob: Job? = null
+    private var transcriptionJob: Job? = null
 
     override suspend fun start(mode: SessionMode) {
-        // Guard: ignore if already starting, active, or stopping.
         when (_state.value) {
             is SessionState.Starting, is SessionState.Active, is SessionState.Stopping -> return
             else -> Unit
@@ -69,6 +65,7 @@ class SpeechCoachSessionManager(
         _state.value = SessionState.Starting
         paceEstimator.reset()
         rollingPaceWindow.reset()
+        transcriptWpmCalculator.reset()
 
         pipelineJob = managerScope.launch {
             val sessionStartMs = System.currentTimeMillis()
@@ -78,10 +75,12 @@ class SpeechCoachSessionManager(
                     sessionState = SessionState.Active,
                     mode = mode,
                     isListening = true,
-                    stats = SessionStats(startedAtMs = sessionStartMs)
+                    stats = SessionStats(startedAtMs = sessionStartMs),
+                    debugInfo = it.debugInfo.copy(transcriptionStatus = localTranscriber.status.value)
                 )
             }
             audioCapture.start()
+            startTranscriptionCollector()
 
             try {
                 segmenter.segment(audioCapture.frames()).collect { segment ->
@@ -90,8 +89,6 @@ class SpeechCoachSessionManager(
                     val feedback = feedbackDecision.evaluate(metrics)
                     val durationMs = System.currentTimeMillis() - sessionStartMs
 
-                    // Dispatch to the external output channel (e.g. vibration) when a new
-                    // feedback event was produced. Suppressed in Passive mode.
                     if (feedback != null && _liveState.value.mode == SessionMode.Active) {
                         feedbackDispatcher?.dispatch(feedback)
                     }
@@ -105,20 +102,17 @@ class SpeechCoachSessionManager(
                             averageEstimatedWpm = rollingPaceWindow.averageEstimatedWpm(),
                             peakEstimatedWpm = rollingPaceWindow.peakEstimatedWpm()
                         )
-                        // alertActive tracks whether the most recent event was a coaching alert.
-                        // It resets to false when pace returns to target; holds its last value
-                        // when no new feedback event fires (cooldown / null).
                         val newAlertActive = when (feedback) {
                             FeedbackEvent.SlowDown, FeedbackEvent.SpeedUp -> true
                             FeedbackEvent.OnTarget -> false
                             null -> current.alertActive
                         }
-                        // Populate debug info if the decision engine supports it.
                         val engine = feedbackDecision as? ThresholdFeedbackDecision
                         val newDebugInfo = DebugPipelineInfo(
                             targetWpm = engine?.currentTargetWpm() ?: current.debugInfo.targetWpm,
                             lastDecisionReason = engine?.lastDecisionReason ?: current.debugInfo.lastDecisionReason,
-                            isInCooldown = engine?.isCooldownActive() ?: false
+                            isInCooldown = engine?.isCooldownActive() ?: false,
+                            transcriptionStatus = current.debugInfo.transcriptionStatus
                         )
                         current.copy(
                             isSpeechDetected = true,
@@ -137,13 +131,15 @@ class SpeechCoachSessionManager(
                 _state.value = SessionState.Error(e)
                 _liveState.update { it.copy(isListening = false) }
             } finally {
+                transcriptionJob?.cancelAndJoin()
+                transcriptionJob = null
+                localTranscriber.stop()
                 audioCapture.stop()
             }
         }
     }
 
     override suspend fun stop() {
-        // Guard: ignore if already idle or in the process of stopping.
         when (_state.value) {
             is SessionState.Idle, is SessionState.Stopping -> return
             else -> Unit
@@ -157,45 +153,61 @@ class SpeechCoachSessionManager(
 
         paceEstimator.reset()
         rollingPaceWindow.reset()
+        transcriptWpmCalculator.reset()
         _liveState.value = LiveSessionState(sessionState = SessionState.Idle)
         _state.value = SessionState.Idle
     }
 
-    /** Releases the internal coroutine scope. Call when this manager is no longer needed. */
     fun release() {
         managerScope.coroutineContext[Job]?.cancel()
     }
 
     companion object {
-        /**
-         * Creates a production-ready [SpeechCoachSessionManager] with default audio, VAD,
-         * segmentation, and pace components wired internally.
-         *
-         * Callers in the UI layer only need to supply cross-cutting dependencies
-         * ([feedbackDispatcher], [sessionRepository], [feedbackDecision]). All lower-level
-         * module types (AudioCapture, SpeechSegmenter, PaceEstimator, RollingPaceWindow)
-         * are resolved internally, keeping those types off the caller's module classpath.
-         *
-         * This prevents compile errors in modules (e.g. `:ui`) that depend on `:session`
-         * but not on `:audio`, `:vad`, `:segmentation`, or `:pace` directly.
-         */
         fun create(
             feedbackDispatcher: FeedbackDispatcher? = null,
             sessionRepository: SessionRepository? = null,
-            feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision()
+            feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
+            localTranscriber: LocalTranscriber = NoOpLocalTranscriber()
         ): SpeechCoachSessionManager = SpeechCoachSessionManager(
             feedbackDispatcher = feedbackDispatcher,
             sessionRepository = sessionRepository,
-            feedbackDecision = feedbackDecision
+            feedbackDecision = feedbackDecision,
+            localTranscriber = localTranscriber
         )
+    }
+
+    private suspend fun startTranscriptionCollector() {
+        try {
+            localTranscriber.start()
+            transcriptionJob = managerScope.launch {
+                launch {
+                    localTranscriber.status.collect { status ->
+                        _liveState.update { current ->
+                            current.copy(debugInfo = current.debugInfo.copy(transcriptionStatus = status))
+                        }
+                    }
+                }
+                localTranscriber.updates.collect { update ->
+                    val snapshot = transcriptWpmCalculator.onUpdate(update)
+                    _liveState.update { current ->
+                        current.copy(
+                            transcriptText = snapshot.transcriptPreview,
+                            transcriptRollingWpm = snapshot.rollingWpm.toFloat()
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            _liveState.update {
+                it.copy(debugInfo = it.debugInfo.copy(transcriptionStatus = TranscriptionEngineStatus.Unavailable))
+            }
+        }
     }
 
     private fun persistSessionSummary(state: LiveSessionState) {
         val repo = sessionRepository ?: return
         val stats = state.stats
         if (stats.startedAtMs == 0L) return
-        // Capture endedAtMs here (before launching) so it reflects when stop() was called,
-        // not when the persistence coroutine happens to execute.
         val endedAtMs = System.currentTimeMillis()
         managerScope.launch {
             repo.insert(

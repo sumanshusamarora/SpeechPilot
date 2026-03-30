@@ -1,5 +1,7 @@
 package com.speechpilot.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,15 +10,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.speechpilot.settings.UserPreferences
@@ -33,6 +42,7 @@ fun SettingsScreen(
         onTargetWpmChange = viewModel::updateTargetWpm,
         onTolerancePctChange = viewModel::updateTolerancePct,
         onFeedbackCooldownChange = viewModel::updateFeedbackCooldownMs,
+        onTranscriptDebugChange = viewModel::updateLocalTranscriptDebugEnabled,
         onBack = onBack
     )
 }
@@ -43,66 +53,99 @@ private fun SettingsContent(
     onTargetWpmChange: (Int) -> Unit,
     onTolerancePctChange: (Float) -> Unit,
     onFeedbackCooldownChange: (Long) -> Unit,
+    onTranscriptDebugChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .background(MaterialTheme.colorScheme.background)
+            .padding(20.dp),
         verticalArrangement = Arrangement.Top
     ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineMedium
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // ── Target WPM ────────────────────────────────────────────────────────
-        SettingRow(label = "Target pace", value = "~${prefs.targetWpm} WPM")
-        Slider(
-            value = prefs.targetWpm.toFloat(),
-            onValueChange = { onTargetWpmChange(it.roundToInt()) },
-            valueRange = 60f..250f,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // ── Tolerance band ────────────────────────────────────────────────────
-        val tolerancePct = (prefs.tolerancePct * 100).roundToInt()
-        SettingRow(label = "Tolerance band", value = "±$tolerancePct%")
-        Slider(
-            value = prefs.tolerancePct,
-            onValueChange = onTolerancePctChange,
-            valueRange = 0.05f..0.40f,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(id = com.speechpilot.ui.R.drawable.ic_speechpilot_logo),
+                    contentDescription = "SpeechPilot logo",
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                )
+                Spacer(modifier = Modifier.size(10.dp))
+                Text("Settings", style = MaterialTheme.typography.headlineSmall)
+            }
+            FilledTonalButton(onClick = onBack) { Text("Back") }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ── Feedback cooldown ─────────────────────────────────────────────────
-        val cooldownSec = (prefs.feedbackCooldownMs / 1_000L).toInt()
-        SettingRow(label = "Feedback cooldown", value = "${cooldownSec}s")
-        Slider(
-            value = prefs.feedbackCooldownMs.toFloat(),
-            onValueChange = { onFeedbackCooldownChange(it.toLong()) },
-            valueRange = 1_000f..30_000f,
-            steps = 28,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                SettingRow(label = "Target pace", value = "~${prefs.targetWpm} WPM")
+                Slider(
+                    value = prefs.targetWpm.toFloat(),
+                    onValueChange = { onTargetWpmChange(it.roundToInt()) },
+                    valueRange = 60f..250f,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Feedback mode: Vibration",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+                val tolerancePct = (prefs.tolerancePct * 100).roundToInt()
+                SettingRow(label = "Tolerance band", value = "±$tolerancePct%")
+                Slider(
+                    value = prefs.tolerancePct,
+                    onValueChange = onTolerancePctChange,
+                    valueRange = 0.05f..0.40f,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-        Spacer(modifier = Modifier.height(32.dp))
+                val cooldownSec = (prefs.feedbackCooldownMs / 1_000L).toInt()
+                SettingRow(label = "Feedback cooldown", value = "${cooldownSec}s")
+                Slider(
+                    value = prefs.feedbackCooldownMs.toFloat(),
+                    onValueChange = { onFeedbackCooldownChange(it.toLong()) },
+                    valueRange = 1_000f..30_000f,
+                    steps = 28,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
 
-        Button(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-            Text("Back")
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Local transcript debug", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "On-device transcript + rolling transcript WPM for calibration.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = prefs.localTranscriptDebugEnabled,
+                    onCheckedChange = onTranscriptDebugChange
+                )
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.speechpilot.R
 import com.speechpilot.MainActivity
 import com.speechpilot.SpeechPilotApp
 
@@ -57,7 +58,7 @@ class SpeechCoachingService : Service() {
         return NotificationCompat.Builder(this, SpeechPilotApp.CHANNEL_ID_SESSION)
             .setContentTitle("SpeechPilot")
             .setContentText("Coaching session active")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.drawable.ic_speechpilot_logo)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setSilent(true)

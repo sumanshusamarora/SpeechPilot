@@ -26,6 +26,11 @@ class UserPreferencesTest {
     }
 
     @Test
+    fun `default localTranscriptDebugEnabled is false`() {
+        assertEquals(false, UserPreferences().localTranscriptDebugEnabled)
+    }
+
+    @Test
     fun `copy updates only specified field`() {
         val base = UserPreferences()
         val updated = base.copy(targetWpm = 160)
@@ -33,6 +38,7 @@ class UserPreferencesTest {
         assertEquals(base.tolerancePct, updated.tolerancePct, 0.001f)
         assertEquals(base.feedbackCooldownMs, updated.feedbackCooldownMs)
         assertEquals(base.micSampleRate, updated.micSampleRate)
+        assertEquals(base.localTranscriptDebugEnabled, updated.localTranscriptDebugEnabled)
     }
 
     @Test
@@ -49,11 +55,13 @@ class UserPreferencesTest {
             targetWpm = 150,
             tolerancePct = 0.20f,
             feedbackCooldownMs = 8_000L,
-            micSampleRate = 44_100
+            micSampleRate = 44_100,
+            localTranscriptDebugEnabled = true
         )
         assertEquals(150, prefs.targetWpm)
         assertEquals(0.20f, prefs.tolerancePct, 0.001f)
         assertEquals(8_000L, prefs.feedbackCooldownMs)
         assertEquals(44_100, prefs.micSampleRate)
+        assertEquals(true, prefs.localTranscriptDebugEnabled)
     }
 }

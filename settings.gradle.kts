@@ -32,3 +32,5 @@ include(":pace")
 include(":feedback")
 include(":data")
 include(":settings")
+
+include(":transcription")
