@@ -123,7 +123,9 @@ During an active session the main screen shows:
 - **Live status text** — "Speaking…" while the VAD detects speech in the current frame window,
   "Listening…" otherwise. The historical "speech detected this session" label is separate.
 - **Debug panel** — shows raw `micLevel` (normalized RMS) and the three-state speech activity
-  label (`yes (right now)` / `yes (this session)` / `none yet`).
+  label (`yes (right now)` / `yes (this session)` / `none yet`), plus live segmentation diagnostics:
+  current VAD frame RMS, VAD threshold, current frame class (speech/silence), segment-open state,
+  open-segment frame/silence counters, and finalized segment count.
 
 These signals update at ~100 ms cadence and do not wait for segment boundaries.
 
@@ -134,6 +136,10 @@ These signals update at ~100 ms cadence and do not wait for segment boundaries.
 | `isSpeechActive` | VAD currently detects speech — live, resets on silence |
 | `isSpeechDetected` | Speech was seen at some point this session — historical, sticky |
 | `micLevel` | Normalized RMS [0, 1] — mic is alive and audio is flowing |
+
+Current defaults used by the live pipeline:
+- `EnergyBasedVad.DEFAULT_THRESHOLD = 750.0` RMS
+- `VadSpeechSegmenter.MIN_SILENCE_FRAMES = 6` (≈ 190 ms at 16 kHz / 512-sample frames)
 
 ---
 

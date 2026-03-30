@@ -1,6 +1,7 @@
 package com.speechpilot.session
 
 import com.speechpilot.feedback.FeedbackEvent
+import com.speechpilot.segmentation.VadFrameClassification
 import com.speechpilot.transcription.TranscriptionEngineStatus
 
 /**
@@ -10,7 +11,14 @@ data class DebugPipelineInfo(
     val targetWpm: Double = 0.0,
     val lastDecisionReason: String = "—",
     val isInCooldown: Boolean = false,
-    val transcriptionStatus: TranscriptionEngineStatus = TranscriptionEngineStatus.Disabled
+    val transcriptionStatus: TranscriptionEngineStatus = TranscriptionEngineStatus.Disabled,
+    val vadFrameRms: Double = 0.0,
+    val vadThreshold: Double = 0.0,
+    val vadFrameClassification: VadFrameClassification = VadFrameClassification.Silence,
+    val isSegmentOpen: Boolean = false,
+    val openSegmentFrameCount: Int = 0,
+    val openSegmentSilenceFrameCount: Int = 0,
+    val finalizedSegmentsCount: Int = 0
 )
 
 /**

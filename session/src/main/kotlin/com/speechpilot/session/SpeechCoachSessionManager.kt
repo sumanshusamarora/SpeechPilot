@@ -15,6 +15,7 @@ import com.speechpilot.pace.RollingPaceWindow
 import com.speechpilot.pace.RollingWindowPaceEstimator
 import com.speechpilot.segmentation.SpeechSegmenter
 import com.speechpilot.segmentation.VadSpeechSegmenter
+import com.speechpilot.segmentation.VadFrameClassification
 import com.speechpilot.transcription.LocalTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RollingTranscriptWpmCalculator
@@ -82,12 +83,20 @@ class SpeechCoachSessionManager(
             val sessionStartMs = System.currentTimeMillis()
             _state.value = SessionState.Active
             _liveState.update {
+                val debugTarget = (feedbackDecision as? ThresholdFeedbackDecision)?.currentTargetWpm()
+                    ?: it.debugInfo.targetWpm
+                val vadThreshold = (segmenter as? VadSpeechSegmenter)?.configuredVadThreshold
+                    ?: EnergyBasedVad.DEFAULT_THRESHOLD
                 it.copy(
                     sessionState = SessionState.Active,
                     mode = mode,
                     isListening = true,
                     stats = SessionStats(startedAtMs = sessionStartMs),
-                    debugInfo = it.debugInfo.copy(transcriptionStatus = localTranscriber.status.value)
+                    debugInfo = it.debugInfo.copy(
+                        targetWpm = debugTarget,
+                        transcriptionStatus = localTranscriber.status.value,
+                        vadThreshold = vadThreshold
+                    )
                 )
             }
             audioCapture.start()
@@ -103,18 +112,42 @@ class SpeechCoachSessionManager(
             // no complete speech segment has been emitted yet.
             launch {
                 var frameCount = 0
+                val vadThreshold = (segmenter as? VadSpeechSegmenter)?.configuredVadThreshold
+                    ?: EnergyBasedVad.DEFAULT_THRESHOLD
                 sharedFrames.collect { frame ->
                     frameCount++
                     if (frameCount % FRAME_LEVEL_UPDATE_INTERVAL == 0) {
                         val rms = computeFrameRms(frame.samples)
                         val level = (rms / MAX_DISPLAY_RMS).coerceIn(0.0, 1.0).toFloat()
-                        val speechActive = rms >= VAD_SPEECH_THRESHOLD
-                        _liveState.update { it.copy(micLevel = level, isSpeechActive = speechActive) }
+                        val speechActive = rms >= vadThreshold
+                        _liveState.update {
+                            it.copy(
+                                micLevel = level,
+                                isSpeechActive = speechActive,
+                                debugInfo = it.debugInfo.copy(vadFrameRms = rms, vadThreshold = vadThreshold)
+                            )
+                        }
                     }
                 }
             }
 
             try {
+                (segmenter as? VadSpeechSegmenter)?.onDebugSnapshot = { snapshot ->
+                    _liveState.update { current ->
+                        current.copy(
+                            isSpeechActive = snapshot.frameClassification == VadFrameClassification.Speech,
+                            debugInfo = current.debugInfo.copy(
+                                vadFrameRms = snapshot.frameRms,
+                                vadThreshold = snapshot.vadThreshold ?: current.debugInfo.vadThreshold,
+                                vadFrameClassification = snapshot.frameClassification,
+                                isSegmentOpen = snapshot.isSegmentOpen,
+                                openSegmentFrameCount = snapshot.openSegmentFrameCount,
+                                openSegmentSilenceFrameCount = snapshot.openSegmentSilenceFrameCount,
+                                finalizedSegmentsCount = snapshot.finalizedSegmentsCount
+                            )
+                        )
+                    }
+                }
                 segmenter.segment(sharedFrames).collect { segment ->
                     val metrics = paceEstimator.estimate(segment)
                     rollingPaceWindow.update(metrics)
@@ -144,7 +177,14 @@ class SpeechCoachSessionManager(
                             targetWpm = engine?.currentTargetWpm() ?: current.debugInfo.targetWpm,
                             lastDecisionReason = engine?.lastDecisionReason ?: current.debugInfo.lastDecisionReason,
                             isInCooldown = engine?.isCooldownActive() ?: false,
-                            transcriptionStatus = current.debugInfo.transcriptionStatus
+                            transcriptionStatus = current.debugInfo.transcriptionStatus,
+                            vadFrameRms = current.debugInfo.vadFrameRms,
+                            vadThreshold = current.debugInfo.vadThreshold,
+                            vadFrameClassification = current.debugInfo.vadFrameClassification,
+                            isSegmentOpen = current.debugInfo.isSegmentOpen,
+                            openSegmentFrameCount = current.debugInfo.openSegmentFrameCount,
+                            openSegmentSilenceFrameCount = current.debugInfo.openSegmentSilenceFrameCount,
+                            finalizedSegmentsCount = newStats.segmentCount
                         )
                         current.copy(
                             isSpeechDetected = true,
@@ -163,6 +203,7 @@ class SpeechCoachSessionManager(
                 _state.value = SessionState.Error(e)
                 _liveState.update { it.copy(isListening = false) }
             } finally {
+                (segmenter as? VadSpeechSegmenter)?.onDebugSnapshot = null
                 transcriptionJob?.cancelAndJoin()
                 transcriptionJob = null
                 localTranscriber.stop()
@@ -213,8 +254,6 @@ class SpeechCoachSessionManager(
         internal const val FRAME_LEVEL_UPDATE_INTERVAL = 3
         /** RMS ceiling used to normalise micLevel to [0, 1]. Covers typical speech levels. */
         internal const val MAX_DISPLAY_RMS = 5_000.0
-        /** RMS threshold that classifies a frame as speech. Matches EnergyBasedVad default. */
-        internal const val VAD_SPEECH_THRESHOLD = 300.0
 
         fun create(
             feedbackDispatcher: FeedbackDispatcher? = null,

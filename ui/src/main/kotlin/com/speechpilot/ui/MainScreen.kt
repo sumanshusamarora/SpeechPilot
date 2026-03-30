@@ -313,6 +313,13 @@ private fun DebugPanel(state: MainUiState) {
             }
             DebugRow(label = "Speech active", value = speechLabel)
             DebugRow(label = "Mic level", value = "%.2f".format(state.micLevel))
+            DebugRow(label = "VAD frame RMS", value = "%.1f".format(debug.vadFrameRms))
+            DebugRow(label = "VAD threshold", value = "%.0f".format(debug.vadThreshold))
+            DebugRow(label = "VAD frame class", value = debug.vadFrameClassification.name.lowercase())
+            DebugRow(label = "Segment open", value = if (debug.isSegmentOpen) "yes" else "no")
+            DebugRow(label = "Open seg frames", value = debug.openSegmentFrameCount.toString())
+            DebugRow(label = "Open seg silence", value = debug.openSegmentSilenceFrameCount.toString())
+            DebugRow(label = "Finalized segs", value = debug.finalizedSegmentsCount.toString())
             DebugRow(label = "Heuristic pace", value = "%.1f est-WPM".format(state.currentWpm))
             DebugRow(label = "Smoothed heuristic", value = "%.1f est-WPM".format(state.smoothedWpm))
             DebugRow(label = "Transcript WPM", value = "%.1f text-WPM".format(state.transcriptRollingWpm))

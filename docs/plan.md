@@ -148,6 +148,27 @@
 - [x] Add unit tests: mic level > 0 after high-energy frames, `isSpeechActive` true/false for high/low-energy frames, `isSpeechDetected` historical persistence
 - [x] Update `phase1_architecture.md` with live audio activity section, updated data flow, speech-activity semantics table
 
+---
+
+## Iteration 12 — Segment Finalization + Debug Observability ✅
+
+**Goal:** Fix "mic alive but pace stuck at zero" by making segmentation state observable and ensuring pace estimation is reachable in real-device sessions.
+
+**Root causes addressed:**
+- Debug target/config values only became fully visible after segment processing paths ran
+- VAD threshold was too permissive for real-device ambient noise, causing near-continuous speech classification
+- Long-enough silence was often not observed, so segments were not finalized and pace estimation never ran
+- UI did not expose segmentation progress (open segment / silence accumulation / finalized count)
+
+**Changes:**
+- [x] Raise `EnergyBasedVad` default threshold from `300` to `750` RMS to improve speech/silence separation on-device
+- [x] Reduce `VadSpeechSegmenter.MIN_SILENCE_FRAMES` from `10` to `6` to finalize segments faster once silence begins
+- [x] Add real-time segmentation diagnostics (`SegmentationDebugSnapshot`) emitted per frame
+- [x] Extend `DebugPipelineInfo` with VAD energy/classification, segment-open counters, and finalized segment count
+- [x] Initialize debug state at session start with configured target WPM and VAD threshold (no longer defaulting to zero)
+- [x] Surface new diagnostics in the debug panel (`MainScreen`)
+- [x] Add deterministic unit tests for segmentation debug snapshots and session debug initialization/finalized-segment reporting
+
 ## Iteration 7 — Polish and QA
 
 **Goal:** Release-candidate quality.

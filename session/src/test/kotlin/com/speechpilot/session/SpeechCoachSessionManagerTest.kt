@@ -2,14 +2,17 @@ package com.speechpilot.session
 
 import com.speechpilot.audio.AudioCapture
 import com.speechpilot.audio.AudioFrame
+import com.speechpilot.feedback.ThresholdFeedbackDecision
 import com.speechpilot.pace.PaceEstimator
 import com.speechpilot.pace.PaceMetrics
 import com.speechpilot.segmentation.SpeechSegment
 import com.speechpilot.segmentation.SpeechSegmenter
+import com.speechpilot.segmentation.VadSpeechSegmenter
 import com.speechpilot.transcription.LocalTranscriber
 import com.speechpilot.transcription.TranscriptStability
 import com.speechpilot.transcription.TranscriptUpdate
 import com.speechpilot.transcription.TranscriptionEngineStatus
+import com.speechpilot.vad.EnergyBasedVad
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -147,9 +150,9 @@ class SpeechCoachSessionManagerTest {
 
     @Test
     fun `mic level and speech active update when high-energy frames arrive`() = runTest {
-        // Samples with value 500 produce RMS = 500, which is above VAD_SPEECH_THRESHOLD (300)
-        // and normalises to 500 / 5000 = 0.1 micLevel.
-        val frame = AudioFrame(ShortArray(512) { 500 }, 16_000, 0L)
+        // Samples with value 1_000 produce RMS = 1_000, above default VAD threshold (750)
+        // and normalises to 1_000 / 5_000 = 0.2 micLevel.
+        val frame = AudioFrame(ShortArray(512) { 1_000 }, 16_000, 0L)
         // Emit FRAME_LEVEL_UPDATE_INTERVAL frames to trigger a state update.
         val frames = flow {
             repeat(SpeechCoachSessionManager.FRAME_LEVEL_UPDATE_INTERVAL) { emit(frame) }
@@ -180,7 +183,7 @@ class SpeechCoachSessionManagerTest {
 
     @Test
     fun `isSpeechActive is false for low-energy silent frames`() = runTest {
-        // Samples with value 10 produce RMS ≈ 10, well below VAD_SPEECH_THRESHOLD (300).
+        // Samples with value 10 produce RMS ≈ 10, well below default VAD threshold (750).
         val frame = AudioFrame(ShortArray(512) { 10 }, 16_000, 0L)
         val frames = flow {
             repeat(SpeechCoachSessionManager.FRAME_LEVEL_UPDATE_INTERVAL) { emit(frame) }
@@ -208,6 +211,47 @@ class SpeechCoachSessionManagerTest {
         assertTrue(manager.liveState.value.isSpeechDetected)
         // isSpeechDetected must persist — it is the historical "speech seen" flag.
         assertTrue(manager.liveState.value.isSpeechDetected)
+        manager.release()
+    }
+
+    @Test
+    fun `debug target and vad threshold are populated immediately on session start`() = runTest {
+        val manager = buildManager(
+            scheduler = testScheduler,
+            segmenter = VadSpeechSegmenter(EnergyBasedVad())
+        )
+
+        manager.start()
+
+        val debugInfo = manager.liveState.value.debugInfo
+        assertEquals(ThresholdFeedbackDecision.TARGET_WPM, debugInfo.targetWpm, 0.001)
+        assertEquals(EnergyBasedVad.DEFAULT_THRESHOLD, debugInfo.vadThreshold, 0.001)
+        manager.release()
+    }
+
+    @Test
+    fun `segmentation debug reports finalized segments when speech followed by silence`() = runTest {
+        val speechFrame = AudioFrame(ShortArray(512) { 1_200 }, 16_000, 0L)
+        val silenceFrame = AudioFrame(ShortArray(512) { 0 }, 16_000, 0L)
+        val frameFlow = flow {
+            repeat(4) { emit(speechFrame.copy(capturedAtMs = it * 32L)) }
+            repeat(VadSpeechSegmenter.MIN_SILENCE_FRAMES) {
+                emit(silenceFrame.copy(capturedAtMs = (4 + it) * 32L))
+            }
+        }
+        val manager = SpeechCoachSessionManager(
+            audioCapture = StubAudioCapture(frameFlow),
+            segmenter = VadSpeechSegmenter(EnergyBasedVad()),
+            dispatcher = UnconfinedTestDispatcher(testScheduler)
+        )
+
+        manager.start()
+
+        assertTrue(manager.liveState.value.stats.segmentCount > 0)
+        assertEquals(
+            manager.liveState.value.stats.segmentCount,
+            manager.liveState.value.debugInfo.finalizedSegmentsCount
+        )
         manager.release()
     }
 }

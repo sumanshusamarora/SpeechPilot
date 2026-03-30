@@ -7,9 +7,23 @@ class EnergyBasedVad(
     private val threshold: Double = DEFAULT_THRESHOLD
 ) : VoiceActivityDetector {
 
+    data class Reading(
+        val rms: Double,
+        val threshold: Double,
+        val result: VadResult
+    )
+
+    val configuredThreshold: Double
+        get() = threshold
+
     override fun detect(frame: AudioFrame): VadResult {
+        return inspect(frame).result
+    }
+
+    fun inspect(frame: AudioFrame): Reading {
         val rms = computeRms(frame.samples)
-        return if (rms >= threshold) VadResult.Speech else VadResult.Silence
+        val result = if (rms >= threshold) VadResult.Speech else VadResult.Silence
+        return Reading(rms = rms, threshold = threshold, result = result)
     }
 
     private fun computeRms(samples: ShortArray): Double {
@@ -19,6 +33,6 @@ class EnergyBasedVad(
     }
 
     companion object {
-        const val DEFAULT_THRESHOLD = 300.0
+        const val DEFAULT_THRESHOLD = 750.0
     }
 }

@@ -252,7 +252,7 @@ The audio frame flow is shared via `shareIn` so `AudioRecord` is only opened onc
 Every `FRAME_LEVEL_UPDATE_INTERVAL` frames (~100 ms at 16 kHz / 512 samples per frame):
 - RMS is computed for the latest frame
 - `micLevel` is updated: `rms / MAX_DISPLAY_RMS`, clamped to [0, 1]
-- `isSpeechActive` is set: `rms >= VAD_SPEECH_THRESHOLD` (300 — matches `EnergyBasedVad`)
+- `isSpeechActive` is set using the configured VAD threshold (`EnergyBasedVad.DEFAULT_THRESHOLD = 750` by default)
 
 This ensures the UI stays responsive even between finalized speech segments, which previously
 caused the interface to appear frozen.
@@ -282,7 +282,8 @@ speech is currently being detected.
 ### Debug Pipeline Info
 
 `DebugPipelineInfo` (inside `LiveSessionState.debugInfo`) exposes internal pipeline state
-for real-device calibration. Populated after each segment during an active session.
+for real-device calibration. It is initialized at session start (before any finalized segment)
+and updated continuously while frames are processed.
 
 | Field | Description |
 |---|---|
@@ -290,9 +291,16 @@ for real-device calibration. Populated after each segment during an active sessi
 | `lastDecisionReason` | Outcome of the last feedback evaluation (e.g. `on-target`, `speed-up`, `cooldown-suppressed`) |
 | `isInCooldown` | True when the feedback cooldown window is active |
 | `transcriptionStatus` | Local transcript engine status enum (`Disabled`, `Listening`, `Restarting`, `Unavailable`, `Error`) |
+| `vadFrameRms` | Current frame RMS from VAD/segmentation path |
+| `vadThreshold` | Active VAD threshold used for classification |
+| `vadFrameClassification` | Current frame class (`Speech` / `Silence`) |
+| `isSegmentOpen` | True when an in-progress segment buffer is open |
+| `openSegmentFrameCount` | Number of speech frames currently buffered in the open segment |
+| `openSegmentSilenceFrameCount` | Consecutive silence frames observed while the segment is open |
+| `finalizedSegmentsCount` | Number of finalized segments emitted in the current session |
 
 The debug panel is shown automatically on the main screen while a session is active. It now also
-shows the live `micLevel` (normalized RMS) and `isSpeechActive` state.
+shows live VAD/segmentation progress so "mic alive but pace zero" failure modes are visible.
 
 ---
 
@@ -422,4 +430,3 @@ Phase 1 does **not** include:
 - Session recovery after process death
 - True always-on background listening daemon
 - Adaptive or personalized pace calibration
-
