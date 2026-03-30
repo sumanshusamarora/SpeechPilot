@@ -149,6 +149,7 @@ Optional local-first transcript path for developer calibration.
 - `LocalTranscriber` is the abstraction for replaceable transcription engines.
 - `AndroidSpeechRecognizerTranscriber` is the Phase 1 implementation (device recognizer, offline-preferred best effort).
 - `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only.
+- `TranscriptDebugState` exposes typed transcript runtime diagnostics (status + counters + pending flags) to keep behavior explicit in the debug UI.
 
 **Important:** transcript-derived WPM is a separate debug metric and is not used to drive feedback decisions in this phase.
 
@@ -156,6 +157,7 @@ Limitations:
 - Recognition quality, offline availability, and latency vary by device/runtime speech services.
 - Partial hypotheses can be revised; only final hypotheses contribute to transcript WPM.
 - Transcript text is in-memory only for the active session.
+- Some devices/services may emit partial hypotheses for long stretches before producing finals; during this period transcript WPM intentionally remains pending/zero.
 
 ### `data`
 
@@ -237,8 +239,7 @@ MicrophoneCapture ──► AudioFrame (Flow, shared via shareIn)
 | `micLevel` | Normalized microphone RMS in [0.0, 1.0]. Updated at frame cadence (~100 ms). Drives the audio level bar visualization. |
 | `currentWpm` | Most recent raw estimated WPM (syllable-rate proxy) |
 | `smoothedWpm` | EMA-smoothed estimated WPM (reduces per-segment noise) |
-| `transcriptText` | Rolling local transcript debug text (final + current partial preview) |
-| `transcriptRollingWpm` | Rolling transcript-derived WPM from finalized recognized words |
+| `transcriptDebug` | `TranscriptDebugState` (typed transcript status, text preview, counters, pending flags, last update timestamp) |
 | `latestFeedback` | Most recent `FeedbackEvent`, if any |
 | `alertActive` | True when the most recent feedback was SlowDown or SpeedUp |
 | `stats` | Session-level `SessionStats` snapshot |

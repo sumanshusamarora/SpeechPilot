@@ -49,10 +49,8 @@ data class LiveSessionState(
     val currentWpm: Float = 0f,
     /** EMA-smoothed estimated WPM across recent segments. Reduces per-segment noise. Approximate proxy only. */
     val smoothedWpm: Float = 0f,
-    /** Rolling transcript text shown for debug calibration. */
-    val transcriptText: String = "",
-    /** Transcript-derived rolling WPM from finalized recognized words. */
-    val transcriptRollingWpm: Float = 0f,
+    /** Typed transcript debug diagnostics for local recognizer visibility. */
+    val transcriptDebug: TranscriptDebugState = TranscriptDebugState(),
     val latestFeedback: FeedbackEvent? = null,
     val alertActive: Boolean = false,
     val stats: SessionStats = SessionStats(),

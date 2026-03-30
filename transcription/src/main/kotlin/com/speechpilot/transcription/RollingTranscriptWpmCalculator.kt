@@ -47,7 +47,8 @@ class RollingTranscriptWpmCalculator(
             rollingWpm = max(0.0, wpm),
             rollingWordCount = wordsInWindow,
             finalizedWordCount = finalizedWordCount,
-            transcriptPreview = buildTranscriptPreview()
+            transcriptPreview = buildTranscriptPreview(),
+            partialTranscriptPresent = partialText.isNotBlank()
         )
     }
 
@@ -93,5 +94,6 @@ data class TranscriptWpmSnapshot(
     val rollingWpm: Double,
     val rollingWordCount: Int,
     val finalizedWordCount: Int,
-    val transcriptPreview: String
+    val transcriptPreview: String,
+    val partialTranscriptPresent: Boolean
 )

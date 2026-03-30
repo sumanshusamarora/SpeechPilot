@@ -133,8 +133,8 @@ class SpeechCoachSessionManagerTest {
         manager.start()
         transcriber.emitFinal("hello world", atMs = 5_000L)
 
-        assertTrue(manager.liveState.value.transcriptText.contains("hello world"))
-        assertTrue(manager.liveState.value.transcriptRollingWpm > 0f)
+        assertTrue(manager.liveState.value.transcriptDebug.transcriptText.contains("hello world"))
+        assertTrue(manager.liveState.value.transcriptDebug.rollingWpm > 0f)
         manager.release()
     }
 
@@ -143,8 +143,22 @@ class SpeechCoachSessionManagerTest {
         val manager = buildManager(scheduler = testScheduler, transcriber = NoOpTestTranscriber())
         manager.start()
 
-        assertEquals("", manager.liveState.value.transcriptText)
-        assertEquals(0f, manager.liveState.value.transcriptRollingWpm, 0.001f)
+        assertEquals("", manager.liveState.value.transcriptDebug.transcriptText)
+        assertEquals(0f, manager.liveState.value.transcriptDebug.rollingWpm, 0.001f)
+        manager.release()
+    }
+
+    @Test
+    fun `partial transcript keeps wpm pending without finalized words`() = runTest {
+        val transcriber = FakeTranscriber()
+        val manager = buildManager(scheduler = testScheduler, transcriber = transcriber)
+
+        manager.start()
+        transcriber.emitPartial("hello there", atMs = 2_000L)
+
+        assertTrue(manager.liveState.value.transcriptDebug.partialTranscriptPresent)
+        assertTrue(manager.liveState.value.transcriptDebug.wpmPendingFinalRecognition)
+        assertEquals(0f, manager.liveState.value.transcriptDebug.rollingWpm, 0.001f)
         manager.release()
     }
 
@@ -315,6 +329,16 @@ private class FakeTranscriber : LocalTranscriber {
             TranscriptUpdate(
                 text = text,
                 stability = TranscriptStability.Final,
+                receivedAtMs = atMs
+            )
+        )
+    }
+
+    fun emitPartial(text: String, atMs: Long) {
+        flow.tryEmit(
+            TranscriptUpdate(
+                text = text,
+                stability = TranscriptStability.Partial,
                 receivedAtMs = atMs
             )
         )

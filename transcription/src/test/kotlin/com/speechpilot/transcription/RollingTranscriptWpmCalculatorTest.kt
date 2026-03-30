@@ -1,6 +1,7 @@
 package com.speechpilot.transcription
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,6 +21,7 @@ class RollingTranscriptWpmCalculatorTest {
 
         assertEquals(0.0, snapshot.rollingWpm, 0.001)
         assertTrue(snapshot.transcriptPreview.contains("[hello there]"))
+        assertTrue(snapshot.partialTranscriptPresent)
     }
 
     @Test
@@ -36,6 +38,7 @@ class RollingTranscriptWpmCalculatorTest {
 
         assertEquals(24.0, snapshot.rollingWpm, 0.001)
         assertEquals(4, snapshot.rollingWordCount)
+        assertFalse(snapshot.partialTranscriptPresent)
     }
 
     @Test
