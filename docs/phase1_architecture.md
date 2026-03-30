@@ -186,7 +186,11 @@ For active sessions, preference changes (including transcript debug enablement) 
 Microphone
    │
    ▼
-MicrophoneCapture ──► AudioFrame (Flow)
+MicrophoneCapture ──► AudioFrame (Flow, shared via shareIn)
+                          │
+                          ├──► Frame-level monitor (every ~100 ms)
+                          │         │
+                          │         └──► micLevel, isSpeechActive ──► LiveSessionState
                           │
                           ▼
                    VoiceActivityDetector ──► VadResult per frame
@@ -228,7 +232,9 @@ MicrophoneCapture ──► AudioFrame (Flow)
 | `sessionState` | Current lifecycle state (Idle / Starting / Active / Stopping / Error) |
 | `mode` | Operational mode of the session (`Active` or `Passive`) |
 | `isListening` | True while audio pipeline is active |
-| `isSpeechDetected` | True once at least one segment has been detected |
+| `isSpeechActive` | **Live** — True while VAD currently classifies incoming audio as speech (~100 ms cadence). Resets to false during silence. Drives "Speaking now" indicator. |
+| `isSpeechDetected` | **Historical** — True once at least one speech segment has been finalized during this session. Remains true for the rest of the session. |
+| `micLevel` | Normalized microphone RMS in [0.0, 1.0]. Updated at frame cadence (~100 ms). Drives the audio level bar visualization. |
 | `currentWpm` | Most recent raw estimated WPM (syllable-rate proxy) |
 | `smoothedWpm` | EMA-smoothed estimated WPM (reduces per-segment noise) |
 | `transcriptText` | Rolling local transcript debug text (final + current partial preview) |
@@ -237,6 +243,41 @@ MicrophoneCapture ──► AudioFrame (Flow)
 | `alertActive` | True when the most recent feedback was SlowDown or SpeedUp |
 | `stats` | Session-level `SessionStats` snapshot |
 | `debugInfo` | `DebugPipelineInfo` — lightweight debug snapshot (see below) |
+
+### Live Audio Activity Monitoring
+
+`SpeechCoachSessionManager` runs a **frame-level monitor** in parallel with the segmenter.
+The audio frame flow is shared via `shareIn` so `AudioRecord` is only opened once.
+
+Every `FRAME_LEVEL_UPDATE_INTERVAL` frames (~100 ms at 16 kHz / 512 samples per frame):
+- RMS is computed for the latest frame
+- `micLevel` is updated: `rms / MAX_DISPLAY_RMS`, clamped to [0, 1]
+- `isSpeechActive` is set: `rms >= VAD_SPEECH_THRESHOLD` (300 — matches `EnergyBasedVad`)
+
+This ensures the UI stays responsive even between finalized speech segments, which previously
+caused the interface to appear frozen.
+
+### Speech Activity Semantics
+
+| State | Meaning | Signal |
+|---|---|---|
+| `isListening = true` | Session is running and mic is open | Session lifecycle |
+| `isSpeechActive = true` | VAD sees speech in the current frame window | Live, resets on silence |
+| `isSpeechDetected = true` | A complete speech segment was finalized at least once | Historical, sticky |
+
+Do not conflate these three. `isSpeechDetected` being false does not mean the mic is silent right
+now — it means no complete segment has been emitted yet (the user may be mid-utterance).
+
+### Audio Level Visualization
+
+The main screen shows five animated vertical bars whose height tracks `micLevel`. The bars:
+- Animate smoothly with a spring animation spec
+- Use primary color when `isSpeechActive`, outline color during silence
+- Always show a minimum height (15 %) so the bars are visible even during silence
+- Only appear when a session is active
+
+This gives the user immediate visual confirmation that the microphone is working and whether
+speech is currently being detected.
 
 ### Debug Pipeline Info
 
@@ -250,7 +291,8 @@ for real-device calibration. Populated after each segment during an active sessi
 | `isInCooldown` | True when the feedback cooldown window is active |
 | `transcriptionStatus` | Local transcript engine status enum (`Disabled`, `Listening`, `Restarting`, `Unavailable`, `Error`) |
 
-The debug panel is shown automatically on the main screen while a session is active.
+The debug panel is shown automatically on the main screen while a session is active. It now also
+shows the live `micLevel` (normalized RMS) and `isSpeechActive` state.
 
 ---
 

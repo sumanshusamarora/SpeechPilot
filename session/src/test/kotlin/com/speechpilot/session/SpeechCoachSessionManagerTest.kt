@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -143,11 +144,84 @@ class SpeechCoachSessionManagerTest {
         assertEquals(0f, manager.liveState.value.transcriptRollingWpm, 0.001f)
         manager.release()
     }
+
+    @Test
+    fun `mic level and speech active update when high-energy frames arrive`() = runTest {
+        // Samples with value 500 produce RMS = 500, which is above VAD_SPEECH_THRESHOLD (300)
+        // and normalises to 500 / 5000 = 0.1 micLevel.
+        val frame = AudioFrame(ShortArray(512) { 500 }, 16_000, 0L)
+        // Emit FRAME_LEVEL_UPDATE_INTERVAL frames to trigger a state update.
+        val frames = flow {
+            repeat(SpeechCoachSessionManager.FRAME_LEVEL_UPDATE_INTERVAL) { emit(frame) }
+        }
+        val manager = SpeechCoachSessionManager(
+            audioCapture = StubAudioCapture(frames),
+            segmenter = NoOpSegmenter(),
+            dispatcher = UnconfinedTestDispatcher(testScheduler)
+        )
+        manager.start()
+
+        assertTrue("micLevel should be > 0 after high-energy frames",
+            manager.liveState.value.micLevel > 0f)
+        assertTrue("isSpeechActive should be true when RMS exceeds threshold",
+            manager.liveState.value.isSpeechActive)
+        manager.release()
+    }
+
+    @Test
+    fun `mic level stays zero and speech inactive when no audio frames emitted`() = runTest {
+        val manager = buildManager(testScheduler)
+        manager.start()
+
+        assertEquals(0f, manager.liveState.value.micLevel, 0.001f)
+        assertFalse(manager.liveState.value.isSpeechActive)
+        manager.release()
+    }
+
+    @Test
+    fun `isSpeechActive is false for low-energy silent frames`() = runTest {
+        // Samples with value 10 produce RMS ≈ 10, well below VAD_SPEECH_THRESHOLD (300).
+        val frame = AudioFrame(ShortArray(512) { 10 }, 16_000, 0L)
+        val frames = flow {
+            repeat(SpeechCoachSessionManager.FRAME_LEVEL_UPDATE_INTERVAL) { emit(frame) }
+        }
+        val manager = SpeechCoachSessionManager(
+            audioCapture = StubAudioCapture(frames),
+            segmenter = NoOpSegmenter(),
+            dispatcher = UnconfinedTestDispatcher(testScheduler)
+        )
+        manager.start()
+
+        assertFalse("isSpeechActive must be false for low-energy (silent) frames",
+            manager.liveState.value.isSpeechActive)
+        manager.release()
+    }
+
+    @Test
+    fun `isSpeechDetected remains true for session lifetime after first speech segment`() = runTest {
+        val segment = buildSegment(startMs = 0L, endMs = 1_000L)
+        val manager = buildManager(
+            scheduler = testScheduler,
+            segmenter = StubSegmenter(listOf(segment))
+        )
+        manager.start()
+        assertTrue(manager.liveState.value.isSpeechDetected)
+        // isSpeechDetected must persist — it is the historical "speech seen" flag.
+        assertTrue(manager.liveState.value.isSpeechDetected)
+        manager.release()
+    }
 }
 
 private class NoOpAudioCapture : AudioCapture {
     override val isCapturing: Boolean = false
     override fun frames(): Flow<AudioFrame> = emptyFlow()
+    override suspend fun start() {}
+    override suspend fun stop() {}
+}
+
+private class StubAudioCapture(private val frameFlow: Flow<AudioFrame>) : AudioCapture {
+    override val isCapturing: Boolean = false
+    override fun frames(): Flow<AudioFrame> = frameFlow
     override suspend fun start() {}
     override suspend fun stop() {}
 }

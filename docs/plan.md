@@ -119,6 +119,35 @@
 - [x] Add settings toggle for transcript debug mode (off by default)
 - [x] Document limits, enablement, and persistence scope
 
+---
+
+## Iteration 11 — Live Audio Activity + UI Responsiveness ✅
+
+**Goal:** Make the app feel observably alive during a session. Add live microphone level, live VAD speech activity, and a visual level meter. Fix top-chrome button clash and system back handling.
+
+**Root causes addressed:**
+- UI only updated on completed speech segments — frozen between segments
+- `isSpeechDetected` was a historical sticky bool, not a live "speaking right now" signal
+- No mic level or audio activity ever reached the UI
+- History / Settings buttons overlapped phone status bar on tall-display devices (e.g. Pixel Fold)
+- System back on Settings / History screens exited the app instead of returning to main screen
+
+**Changes:**
+- [x] Add `isSpeechActive: Boolean` to `LiveSessionState` — live frame-cadence VAD signal (~100 ms)
+- [x] Add `micLevel: Float` to `LiveSessionState` — normalized RMS [0, 1] updated per frame window
+- [x] Add frame-level monitor in `SpeechCoachSessionManager`: share audio frames via `shareIn`, launch parallel coroutine computing RMS and speech-active every `FRAME_LEVEL_UPDATE_INTERVAL` (3) frames
+- [x] Add `computeFrameRms()` private utility in session manager (mirrors `EnergyBasedVad` logic)
+- [x] Add `isSpeechActive` and `micLevel` to `MainUiState`; map from `LiveSessionState` in `MainViewModel`
+- [x] Update `statusText` in `MainViewModel` to show "Speaking…" when `isSpeechActive`
+- [x] Add `AudioLevelBars` composable to `MainScreen` — five animated bars in the status card header driven by `micLevel`, colored by `isSpeechActive`
+- [x] Update status subtitle to use three-state messaging: "Speaking now" / "Speech detected this session" / "Waiting for speech…"
+- [x] Update debug panel to show live `micLevel` and three-state `isSpeechActive` / `isSpeechDetected` label
+- [x] Add `statusBarsPadding()` to `MainScreen`, `SettingsScreen`, and `HistoryScreen` columns to avoid status bar overlap on tall-display devices
+- [x] Add `BackHandler` in `AppNavigation` for Settings / History screens so system back returns to main screen
+- [x] Add `implementation(libs.androidx.activity.compose)` to `ui/build.gradle.kts` for `BackHandler`
+- [x] Add unit tests: mic level > 0 after high-energy frames, `isSpeechActive` true/false for high/low-energy frames, `isSpeechDetected` historical persistence
+- [x] Update `phase1_architecture.md` with live audio activity section, updated data flow, speech-activity semantics table
+
 ## Iteration 7 — Polish and QA
 
 **Goal:** Release-candidate quality.

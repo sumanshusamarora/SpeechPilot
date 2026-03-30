@@ -8,7 +8,7 @@ All core coaching pipeline processing runs locally on-device. No backend, cloud,
 
 ## Project Status
 
-✅ **Phase 1 — Feature-complete.** Full audio→VAD→segmentation→pace→feedback pipeline running, with local settings and session history persistence, foreground-service background support, and live session UI.
+✅ **Phase 1 — Feature-complete.** Full audio→VAD→segmentation→pace→feedback pipeline running, with local settings and session history persistence, foreground-service background support, live audio level visualization, and a responsive live session UI.
 
 ---
 
@@ -110,6 +110,30 @@ SpeechPilot now includes an **optional local transcript debug mode** for calibra
 > Notes: transcript quality/timing and true offline behavior depend on on-device speech services and installed language packs.
 > Changes to the transcript debug toggle apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
+
+---
+
+### Live audio activity
+
+During an active session the main screen shows:
+
+- **Animated level bars** — five bars whose height tracks the normalized microphone RMS level.
+  They use the primary color when speech is detected in the current frame, and a neutral outline
+  color during silence. This confirms the microphone is working without requiring a completed segment.
+- **Live status text** — "Speaking…" while the VAD detects speech in the current frame window,
+  "Listening…" otherwise. The historical "speech detected this session" label is separate.
+- **Debug panel** — shows raw `micLevel` (normalized RMS) and the three-state speech activity
+  label (`yes (right now)` / `yes (this session)` / `none yet`).
+
+These signals update at ~100 ms cadence and do not wait for segment boundaries.
+
+#### Speech activity semantics
+
+| Indicator | Meaning |
+|---|---|
+| `isSpeechActive` | VAD currently detects speech — live, resets on silence |
+| `isSpeechDetected` | Speech was seen at some point this session — historical, sticky |
+| `micLevel` | Normalized RMS [0, 1] — mic is alive and audio is flowing |
 
 ---
 

@@ -8,7 +8,12 @@ data class MainUiState(
     val statusText: String = "Ready",
     val isSessionActive: Boolean = false,
     val isListening: Boolean = false,
+    /** True while the VAD currently classifies audio as speech (live, frame-cadence). */
+    val isSpeechActive: Boolean = false,
+    /** True once speech has been detected at any point during this session. */
     val isSpeechDetected: Boolean = false,
+    /** Normalized microphone RMS level [0, 1]. Updated at frame cadence during sessions. */
+    val micLevel: Float = 0f,
     /** Most recent raw estimated WPM. Approximate proxy — not exact WPM. */
     val currentWpm: Float = 0f,
     /** EMA-smoothed estimated WPM. Approximate proxy — not exact WPM. */
@@ -30,5 +35,12 @@ data class MainUiState(
     /** Operational mode of the current or most recently completed session. */
     val sessionMode: SessionMode = SessionMode.Active,
     /** Live debug snapshot for pipeline calibration. Populated during an active session. */
-    val debugInfo: DebugPipelineInfo = DebugPipelineInfo()
+    val debugInfo: DebugPipelineInfo = DebugPipelineInfo(),
+    /** True when the current (or most recently started) session is analyzing an uploaded file. */
+    val isFileSession: Boolean = false,
+    /**
+     * Content URI string of the file being analyzed, or null for live-microphone sessions.
+     * Non-null only when [isFileSession] is true.
+     */
+    val fileSessionUri: String? = null
 )
