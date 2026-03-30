@@ -84,6 +84,16 @@
 
 ---
 
+## Iteration 9C — Stabilization, Bug-Fix, and Integration Coherence ✅
+
+**Goal:** Fix issues introduced across earlier iterations and improve coherence, correctness, and maintainability. No new features.
+
+- [x] **Fix `:ui:compileReleaseKotlin` build failure** — `MainViewModel` directly instantiated `SpeechCoachSessionManager` with named constructor arguments, but `:ui` does not depend on `:audio`, `:vad`, or `:pace`. Kotlin's compiler requires visibility of all constructor parameter types when resolving default-argument calls. Fixed by adding a `SpeechCoachSessionManager.create()` companion factory that accepts only types already on `:ui`'s classpath (`FeedbackDispatcher?`, `SessionRepository?`, `FeedbackDecision`), and updating `MainViewModel` to use it.
+- [x] **Fix nullable warning in `RollingWindowPaceEstimator.evictOldSegments`** — `java.util.ArrayDeque.peekFirst()` returns a nullable type in Kotlin. The original call was unsafe (`segmentQueue.peekFirst().startMs`). Fixed by extracting into a null-safe local variable with an early break.
+- [x] Review and confirm docs accuracy (README, `phase1_architecture.md`)
+
+---
+
 ## Iteration 6 — Improved Pace Estimation
 
 **Goal:** Replace placeholder WPM estimation with a real word-boundary approach.

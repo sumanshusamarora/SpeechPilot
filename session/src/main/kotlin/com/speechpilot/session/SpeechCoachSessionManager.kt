@@ -158,6 +158,30 @@ class SpeechCoachSessionManager(
         managerScope.coroutineContext[Job]?.cancel()
     }
 
+    companion object {
+        /**
+         * Creates a production-ready [SpeechCoachSessionManager] with default audio, VAD,
+         * segmentation, and pace components wired internally.
+         *
+         * Callers in the UI layer only need to supply cross-cutting dependencies
+         * ([feedbackDispatcher], [sessionRepository], [feedbackDecision]). All lower-level
+         * module types (AudioCapture, SpeechSegmenter, PaceEstimator, RollingPaceWindow)
+         * are resolved internally, keeping those types off the caller's module classpath.
+         *
+         * This prevents compile errors in modules (e.g. `:ui`) that depend on `:session`
+         * but not on `:audio`, `:vad`, `:segmentation`, or `:pace` directly.
+         */
+        fun create(
+            feedbackDispatcher: FeedbackDispatcher? = null,
+            sessionRepository: SessionRepository? = null,
+            feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision()
+        ): SpeechCoachSessionManager = SpeechCoachSessionManager(
+            feedbackDispatcher = feedbackDispatcher,
+            sessionRepository = sessionRepository,
+            feedbackDecision = feedbackDecision
+        )
+    }
+
     private fun persistSessionSummary(state: LiveSessionState) {
         val repo = sessionRepository ?: return
         val stats = state.stats
