@@ -23,6 +23,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":audio"))
     implementation(project(":segmentation"))
 
     implementation(libs.kotlinx.coroutines.core)
