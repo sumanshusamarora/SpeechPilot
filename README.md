@@ -106,10 +106,17 @@ SpeechPilot now includes an **optional local transcript debug mode** for calibra
 - Computes a separate rolling **transcript-derived WPM** from finalized recognized words
 - Keeps transcript WPM separate from the existing heuristic est-WPM signal
 - Is disabled by default and can be enabled in **Settings → Local transcript debug**
+- Always shows a transcript diagnostics block in the debug panel when enabled, including:
+  - status (`disabled`, `listening`, `waiting for speech`, `partial transcript available`, `final transcript available`, `unavailable`, `error`)
+  - partial transcript present flag
+  - finalized and rolling transcript word counts
+  - last transcript update timestamp (ms)
+  - explicit `pending final recognition` when transcript WPM is still zero due to no final words
 
 > Notes: transcript quality/timing and true offline behavior depend on on-device speech services and installed language packs.
 > Changes to the transcript debug toggle apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
+> Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending/zero by design.
 
 ---
 

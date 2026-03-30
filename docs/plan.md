@@ -121,6 +121,20 @@
 
 ---
 
+## Iteration 13 — Transcript Runtime Visibility + Diagnosis ✅
+
+**Goal:** Make transcript debug behavior explicit and diagnosable during live sessions.
+
+- [x] Add typed transcript runtime model (`TranscriptDebugState`, `TranscriptDebugStatus`)
+- [x] Keep transcript diagnostics visible in UI whenever transcript debug mode is enabled (even with blank transcript text)
+- [x] Distinguish waiting / partial-only / final-available / unavailable / error states
+- [x] Add explicit transcript WPM pending context when no finalized words have been recognized yet
+- [x] Expose lightweight transcript diagnostics: partial-present flag, finalized/rolling word counts, last update timestamp
+- [x] Add deterministic tests for transcript status mapping and partial-only behavior
+- [x] Update README + architecture docs for transcript debug status semantics and final-word WPM dependency
+
+---
+
 ## Iteration 11 — Live Audio Activity + UI Responsiveness ✅
 
 **Goal:** Make the app feel observably alive during a session. Add live microphone level, live VAD speech activity, and a visual level meter. Fix top-chrome button clash and system back handling.

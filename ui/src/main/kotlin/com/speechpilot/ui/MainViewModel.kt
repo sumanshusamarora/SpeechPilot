@@ -40,6 +40,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             appSettings.preferences.collect { prefs ->
                 latestPreferences = prefs
+                _uiState.update { it.copy(transcriptDebugEnabled = prefs.localTranscriptDebugEnabled) }
                 val isSessionActive = sessionManager?.liveState?.value?.sessionState == SessionState.Active
                 if (!isSessionActive) {
                     recreateSessionManager(prefs)
@@ -66,7 +67,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 tolerancePct = prefs.tolerancePct.toDouble(),
                 cooldownMs = prefs.feedbackCooldownMs
             ),
-            localTranscriber = transcriber
+            localTranscriber = transcriber,
+            transcriptDebugEnabled = prefs.localTranscriptDebugEnabled
         )
         sessionManager = mgr
         startWatchingLiveState(mgr, isFileSession = false, fileSessionUri = null)
@@ -85,7 +87,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 targetWpm = prefs.targetWpm.toDouble(),
                 tolerancePct = prefs.tolerancePct.toDouble(),
                 cooldownMs = prefs.feedbackCooldownMs
-            )
+            ),
+            transcriptDebugEnabled = prefs.localTranscriptDebugEnabled
         )
         sessionManager = mgr
         startWatchingLiveState(mgr, isFileSession = true, fileSessionUri = uri.toString())
@@ -119,8 +122,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         micLevel = live.micLevel,
                         currentWpm = live.currentWpm,
                         smoothedWpm = live.smoothedWpm,
-                        transcriptText = live.transcriptText,
-                        transcriptRollingWpm = live.transcriptRollingWpm,
+                        transcriptDebug = live.transcriptDebug,
                         segmentCount = live.stats.segmentCount,
                         latestFeedback = live.latestFeedback,
                         alertActive = live.alertActive,

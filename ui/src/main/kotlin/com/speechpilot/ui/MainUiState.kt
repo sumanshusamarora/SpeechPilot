@@ -3,6 +3,7 @@ package com.speechpilot.ui
 import com.speechpilot.feedback.FeedbackEvent
 import com.speechpilot.session.DebugPipelineInfo
 import com.speechpilot.session.SessionMode
+import com.speechpilot.session.TranscriptDebugState
 
 data class MainUiState(
     val statusText: String = "Ready",
@@ -18,10 +19,10 @@ data class MainUiState(
     val currentWpm: Float = 0f,
     /** EMA-smoothed estimated WPM. Approximate proxy — not exact WPM. */
     val smoothedWpm: Float = 0f,
-    /** Rolling transcript text from local debug transcription. */
-    val transcriptText: String = "",
-    /** Rolling WPM derived from finalized transcript words. */
-    val transcriptRollingWpm: Float = 0f,
+    /** Mirrors the settings toggle for local transcript debug visibility. */
+    val transcriptDebugEnabled: Boolean = false,
+    /** Typed runtime transcript debug diagnostics from the session pipeline. */
+    val transcriptDebug: TranscriptDebugState = TranscriptDebugState(),
     val segmentCount: Int = 0,
     val latestFeedback: FeedbackEvent? = null,
     /**

@@ -53,6 +53,7 @@ class SpeechCoachSessionManager(
     private val feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
     private val localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
     private val transcriptWpmCalculator: RollingTranscriptWpmCalculator = RollingTranscriptWpmCalculator(),
+    private val transcriptDebugEnabled: Boolean = false,
     private val feedbackDispatcher: FeedbackDispatcher? = null,
     private val sessionRepository: SessionRepository? = null,
     private val audioFileUri: String? = null,
@@ -92,6 +93,24 @@ class SpeechCoachSessionManager(
                     mode = mode,
                     isListening = true,
                     stats = SessionStats(startedAtMs = sessionStartMs),
+                    transcriptDebug = it.transcriptDebug.copy(
+                        debugEnabled = transcriptDebugEnabled,
+                        status = resolveTranscriptDebugStatus(
+                            debugEnabled = transcriptDebugEnabled,
+                            engineStatus = localTranscriber.status.value,
+                            isSessionListening = true,
+                            partialTranscriptPresent = false,
+                            finalizedWordCount = 0
+                        ),
+                        engineStatus = localTranscriber.status.value,
+                        transcriptText = "",
+                        partialTranscriptPresent = false,
+                        finalizedWordCount = 0,
+                        rollingWordCount = 0,
+                        rollingWpm = 0f,
+                        wpmPendingFinalRecognition = false,
+                        lastUpdateAtMs = null
+                    ),
                     debugInfo = it.debugInfo.copy(
                         targetWpm = debugTarget,
                         transcriptionStatus = localTranscriber.status.value,
@@ -259,12 +278,14 @@ class SpeechCoachSessionManager(
             feedbackDispatcher: FeedbackDispatcher? = null,
             sessionRepository: SessionRepository? = null,
             feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
-            localTranscriber: LocalTranscriber = NoOpLocalTranscriber()
+            localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
+            transcriptDebugEnabled: Boolean = false
         ): SpeechCoachSessionManager = SpeechCoachSessionManager(
             feedbackDispatcher = feedbackDispatcher,
             sessionRepository = sessionRepository,
             feedbackDecision = feedbackDecision,
-            localTranscriber = localTranscriber
+            localTranscriber = localTranscriber,
+            transcriptDebugEnabled = transcriptDebugEnabled
         )
 
         /**
@@ -285,13 +306,15 @@ class SpeechCoachSessionManager(
             feedbackDispatcher: FeedbackDispatcher? = null,
             sessionRepository: SessionRepository? = null,
             feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
-            localTranscriber: LocalTranscriber = NoOpLocalTranscriber()
+            localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
+            transcriptDebugEnabled: Boolean = false
         ): SpeechCoachSessionManager = SpeechCoachSessionManager(
             audioCapture = FileAudioCapture(context, audioFileUri),
             feedbackDispatcher = feedbackDispatcher,
             sessionRepository = sessionRepository,
             feedbackDecision = feedbackDecision,
             localTranscriber = localTranscriber,
+            transcriptDebugEnabled = transcriptDebugEnabled,
             audioFileUri = audioFileUri.toString()
         )
     }
@@ -308,25 +331,68 @@ class SpeechCoachSessionManager(
             localTranscriber.start()
             transcriptionJob = managerScope.launch {
                 launch {
-                    localTranscriber.status.collect { status ->
+            localTranscriber.status.collect { status ->
                         _liveState.update { current ->
-                            current.copy(debugInfo = current.debugInfo.copy(transcriptionStatus = status))
+                            val transcript = current.transcriptDebug
+                            current.copy(
+                                debugInfo = current.debugInfo.copy(transcriptionStatus = status),
+                                transcriptDebug = transcript.copy(
+                                    engineStatus = status,
+                                    status = resolveTranscriptDebugStatus(
+                                        debugEnabled = transcript.debugEnabled,
+                                        engineStatus = status,
+                                        isSessionListening = current.isListening,
+                                        partialTranscriptPresent = transcript.partialTranscriptPresent,
+                                        finalizedWordCount = transcript.finalizedWordCount
+                                    )
+                                )
+                            )
                         }
                     }
                 }
                 localTranscriber.updates.collect { update ->
                     val snapshot = transcriptWpmCalculator.onUpdate(update)
                     _liveState.update { current ->
+                        val debugEnabled = current.transcriptDebug.debugEnabled
+                        val status = resolveTranscriptDebugStatus(
+                            debugEnabled = debugEnabled,
+                            engineStatus = current.transcriptDebug.engineStatus,
+                            isSessionListening = current.isListening,
+                            partialTranscriptPresent = snapshot.partialTranscriptPresent,
+                            finalizedWordCount = snapshot.finalizedWordCount
+                        )
                         current.copy(
-                            transcriptText = snapshot.transcriptPreview,
-                            transcriptRollingWpm = snapshot.rollingWpm.toFloat()
+                            transcriptDebug = current.transcriptDebug.copy(
+                                status = status,
+                                transcriptText = snapshot.transcriptPreview,
+                                partialTranscriptPresent = snapshot.partialTranscriptPresent,
+                                finalizedWordCount = snapshot.finalizedWordCount,
+                                rollingWordCount = snapshot.rollingWordCount,
+                                rollingWpm = snapshot.rollingWpm.toFloat(),
+                                wpmPendingFinalRecognition = snapshot.partialTranscriptPresent &&
+                                    snapshot.finalizedWordCount == 0,
+                                lastUpdateAtMs = update.receivedAtMs
+                            )
                         )
                     }
                 }
             }
         } catch (e: Exception) {
-            _liveState.update {
-                it.copy(debugInfo = it.debugInfo.copy(transcriptionStatus = TranscriptionEngineStatus.Unavailable))
+                _liveState.update {
+                val transcript = it.transcriptDebug
+                it.copy(
+                    debugInfo = it.debugInfo.copy(transcriptionStatus = TranscriptionEngineStatus.Unavailable),
+                    transcriptDebug = transcript.copy(
+                        engineStatus = TranscriptionEngineStatus.Unavailable,
+                        status = resolveTranscriptDebugStatus(
+                            debugEnabled = transcript.debugEnabled,
+                            engineStatus = TranscriptionEngineStatus.Unavailable,
+                            isSessionListening = it.isListening,
+                            partialTranscriptPresent = transcript.partialTranscriptPresent,
+                            finalizedWordCount = transcript.finalizedWordCount
+                        )
+                    )
+                )
             }
         }
     }

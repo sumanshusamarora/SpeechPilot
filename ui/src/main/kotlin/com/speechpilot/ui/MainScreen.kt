@@ -39,6 +39,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.speechpilot.feedback.FeedbackEvent
 import com.speechpilot.session.SessionMode
+import com.speechpilot.session.TranscriptDebugStatus
 import androidx.compose.ui.platform.LocalContext
 
 @Composable
@@ -211,7 +212,7 @@ private fun MainContent(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        if (state.isListening || state.isSpeechDetected) {
+        if (state.isListening || state.isSpeechDetected || state.transcriptDebugEnabled) {
             DebugPanel(state = state)
             Spacer(modifier = Modifier.height(12.dp))
         }
@@ -322,23 +323,73 @@ private fun DebugPanel(state: MainUiState) {
             DebugRow(label = "Finalized segs", value = debug.finalizedSegmentsCount.toString())
             DebugRow(label = "Heuristic pace", value = "%.1f est-WPM".format(state.currentWpm))
             DebugRow(label = "Smoothed heuristic", value = "%.1f est-WPM".format(state.smoothedWpm))
-            DebugRow(label = "Transcript WPM", value = "%.1f text-WPM".format(state.transcriptRollingWpm))
+            DebugRow(
+                label = "Transcript debug",
+                value = if (state.transcriptDebugEnabled) "enabled" else "disabled"
+            )
+            DebugRow(
+                label = "Transcript status",
+                value = transcriptStatusLabel(state.transcriptDebug.status)
+            )
+            DebugRow(
+                label = "Transcript engine",
+                value = state.transcriptDebug.engineStatus.name.lowercase()
+            )
+            DebugRow(
+                label = "Partial transcript",
+                value = if (state.transcriptDebug.partialTranscriptPresent) "yes" else "no"
+            )
+            DebugRow(label = "Final transcript words", value = state.transcriptDebug.finalizedWordCount.toString())
+            DebugRow(label = "Rolling transcript words", value = state.transcriptDebug.rollingWordCount.toString())
+            DebugRow(
+                label = "Transcript WPM",
+                value = if (state.transcriptDebug.wpmPendingFinalRecognition) {
+                    "pending final recognition"
+                } else {
+                    "%.1f text-WPM".format(state.transcriptDebug.rollingWpm)
+                }
+            )
+            val lastUpdateLabel = state.transcriptDebug.lastUpdateAtMs?.toString() ?: "none"
+            DebugRow(label = "Transcript last update", value = lastUpdateLabel)
             DebugRow(label = "Target", value = "%.0f est-WPM".format(debug.targetWpm))
             DebugRow(label = "Transcription", value = debug.transcriptionStatus.name.lowercase())
             DebugRow(label = "Last decision", value = debug.lastDecisionReason)
             DebugRow(label = "Cooldown", value = if (debug.isInCooldown) "active" else "clear")
             DebugRow(label = "Alert", value = if (state.alertActive) "triggered" else "suppressed/none")
 
-            if (state.transcriptText.isNotBlank()) {
+            if (state.transcriptDebugEnabled) {
                 Spacer(modifier = Modifier.height(6.dp))
+                val transcriptText = state.transcriptDebug.transcriptText
+                val transcriptMessage = when {
+                    transcriptText.isNotBlank() -> transcriptText
+                    state.transcriptDebug.status == TranscriptDebugStatus.Disabled ->
+                        "Transcript debug disabled in settings."
+                    state.transcriptDebug.status == TranscriptDebugStatus.Unavailable ->
+                        "Transcription unavailable on this device/runtime."
+                    state.transcriptDebug.status == TranscriptDebugStatus.Error ->
+                        "Transcription error. Engine will retry while session is active."
+                    state.transcriptDebug.partialTranscriptPresent ->
+                        "Partial transcript available, waiting for final recognition."
+                    else -> "No transcript text recognized yet."
+                }
                 Text(
-                    text = "Transcript: ${state.transcriptText}",
+                    text = "Transcript: $transcriptMessage",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
     }
+}
+
+private fun transcriptStatusLabel(status: TranscriptDebugStatus): String = when (status) {
+    TranscriptDebugStatus.Disabled -> "disabled"
+    TranscriptDebugStatus.Listening -> "listening"
+    TranscriptDebugStatus.WaitingForSpeech -> "waiting for speech"
+    TranscriptDebugStatus.PartialAvailable -> "partial transcript available"
+    TranscriptDebugStatus.FinalAvailable -> "final transcript available"
+    TranscriptDebugStatus.Unavailable -> "unavailable"
+    TranscriptDebugStatus.Error -> "error"
 }
 
 @Composable
