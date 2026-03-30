@@ -1,6 +1,7 @@
 package com.speechpilot.session
 
 import com.speechpilot.feedback.FeedbackEvent
+import com.speechpilot.transcription.TranscriptionEngineStatus
 
 /**
  * Lightweight debug snapshot of the speech pipeline's internal state.
@@ -9,7 +10,7 @@ data class DebugPipelineInfo(
     val targetWpm: Double = 0.0,
     val lastDecisionReason: String = "—",
     val isInCooldown: Boolean = false,
-    val transcriptionStatus: String = "disabled"
+    val transcriptionStatus: TranscriptionEngineStatus = TranscriptionEngineStatus.Disabled
 )
 
 /**

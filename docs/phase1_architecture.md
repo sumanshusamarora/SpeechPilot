@@ -144,16 +144,16 @@ FeedbackMode:  Vibration                         (Phase 1 only)
 
 ### `transcription`
 
-Optional local-only transcript path for developer calibration.
+Optional local-first transcript path for developer calibration.
 
 - `LocalTranscriber` is the abstraction for replaceable transcription engines.
-- `AndroidSpeechRecognizerTranscriber` is the Phase 1 implementation (local device recognizer, offline-preferred).
+- `AndroidSpeechRecognizerTranscriber` is the Phase 1 implementation (device recognizer, offline-preferred best effort).
 - `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only.
 
 **Important:** transcript-derived WPM is a separate debug metric and is not used to drive feedback decisions in this phase.
 
 Limitations:
-- Recognition quality and latency vary by device/runtime speech services.
+- Recognition quality, offline availability, and latency vary by device/runtime speech services.
 - Partial hypotheses can be revised; only final hypotheses contribute to transcript WPM.
 - Transcript text is in-memory only for the active session.
 
@@ -175,8 +175,8 @@ DataStore-backed user preferences. `DataStoreAppSettings` is the concrete implem
 `user_preferences`. Persists: `targetWpm`, `tolerancePct`, `feedbackCooldownMs`,
 `micSampleRate`. All data is local-only.
 
-Settings are loaded once at `MainViewModel` initialisation time via `AppSettings.preferences.first()`.
-Changes saved via `SettingsViewModel` take effect from the next session start.
+Settings are observed continuously by `MainViewModel`.
+For active sessions, preference changes (including transcript debug enablement) apply from the next session start to avoid disrupting the running pipeline.
 
 ---
 
@@ -248,7 +248,7 @@ for real-device calibration. Populated after each segment during an active sessi
 | `targetWpm` | The configured target pace threshold (est-WPM) |
 | `lastDecisionReason` | Outcome of the last feedback evaluation (e.g. `on-target`, `speed-up`, `cooldown-suppressed`) |
 | `isInCooldown` | True when the feedback cooldown window is active |
-| `transcriptionStatus` | Local transcript engine status (`starting`, `listening`, `unavailable`, etc.) |
+| `transcriptionStatus` | Local transcript engine status enum (`Disabled`, `Listening`, `Restarting`, `Unavailable`, `Error`) |
 
 The debug panel is shown automatically on the main screen while a session is active.
 

@@ -13,16 +13,17 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Debug-oriented local transcriber built on Android's [SpeechRecognizer].
+ * Debug-oriented transcriber built on Android's [SpeechRecognizer].
  *
- * This implementation requests offline recognition (`EXTRA_PREFER_OFFLINE=true`) and never
- * makes direct app-level network calls, but availability/quality depend on device speech packs
- * and the platform recognition service.
+ * `EXTRA_PREFER_OFFLINE=true` is requested, but behavior remains recognition-service dependent.
  */
 class AndroidSpeechRecognizerTranscriber(
     context: Context,
@@ -40,13 +41,16 @@ class AndroidSpeechRecognizerTranscriber(
     )
     override val updates: Flow<TranscriptUpdate> = _updates.asSharedFlow()
 
+    private val _status = MutableStateFlow(TranscriptionEngineStatus.Disabled)
+    override val status: StateFlow<TranscriptionEngineStatus> = _status.asStateFlow()
+
     @Volatile
     private var shouldListen = false
     private var recognizer: SpeechRecognizer? = null
 
     override suspend fun start() {
         if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
-            emitStatus("speech recognizer unavailable", TranscriptStability.Final)
+            _status.value = TranscriptionEngineStatus.Unavailable
             return
         }
         shouldListen = true
@@ -56,6 +60,7 @@ class AndroidSpeechRecognizerTranscriber(
                     setRecognitionListener(Listener())
                 }
             }
+            _status.value = TranscriptionEngineStatus.Listening
             recognizer?.startListening(recognizerIntent())
         }
     }
@@ -67,6 +72,7 @@ class AndroidSpeechRecognizerTranscriber(
             recognizer?.cancel()
             recognizer?.destroy()
             recognizer = null
+            _status.value = TranscriptionEngineStatus.Disabled
         }
     }
 
@@ -77,7 +83,7 @@ class AndroidSpeechRecognizerTranscriber(
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
 
-    private fun emitStatus(text: String, stability: TranscriptStability) {
+    private fun emitTranscript(text: String, stability: TranscriptStability) {
         scope.launch {
             _updates.emit(
                 TranscriptUpdate(
@@ -86,6 +92,18 @@ class AndroidSpeechRecognizerTranscriber(
                     receivedAtMs = clockMs()
                 )
             )
+        }
+    }
+
+    private fun restartListening() {
+        if (!shouldListen) return
+        scope.launch {
+            _status.value = TranscriptionEngineStatus.Restarting
+            withContext(mainDispatcher) {
+                recognizer?.cancel()
+                recognizer?.startListening(recognizerIntent())
+                _status.value = TranscriptionEngineStatus.Listening
+            }
         }
     }
 
@@ -103,9 +121,7 @@ class AndroidSpeechRecognizerTranscriber(
                 ?.firstOrNull()
                 ?.trim()
                 .orEmpty()
-            if (text.isNotEmpty()) {
-                emitStatus(text, TranscriptStability.Partial)
-            }
+            if (text.isNotEmpty()) emitTranscript(text, TranscriptStability.Partial)
         }
 
         override fun onResults(results: Bundle?) {
@@ -114,28 +130,14 @@ class AndroidSpeechRecognizerTranscriber(
                 ?.firstOrNull()
                 ?.trim()
                 .orEmpty()
-            if (text.isNotEmpty()) {
-                emitStatus(text, TranscriptStability.Final)
-            }
-            if (shouldListen) {
-                scope.launch {
-                    withContext(mainDispatcher) {
-                        recognizer?.startListening(recognizerIntent())
-                    }
-                }
-            }
+            if (text.isNotEmpty()) emitTranscript(text, TranscriptStability.Final)
+            restartListening()
         }
 
         override fun onError(error: Int) {
             if (!shouldListen) return
-            // Emit a lightweight debug hint and continue listening.
-            emitStatus("[transcription error: $error]", TranscriptStability.Final)
-            scope.launch {
-                withContext(mainDispatcher) {
-                    recognizer?.cancel()
-                    recognizer?.startListening(recognizerIntent())
-                }
-            }
+            _status.value = TranscriptionEngineStatus.Error
+            restartListening()
         }
     }
 }

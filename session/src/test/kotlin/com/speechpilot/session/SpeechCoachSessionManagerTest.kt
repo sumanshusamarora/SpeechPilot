@@ -9,9 +9,12 @@ import com.speechpilot.segmentation.SpeechSegmenter
 import com.speechpilot.transcription.LocalTranscriber
 import com.speechpilot.transcription.TranscriptStability
 import com.speechpilot.transcription.TranscriptUpdate
+import com.speechpilot.transcription.TranscriptionEngineStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -167,16 +170,27 @@ private class ConstantPaceEstimator(private val estimatedWpm: Double) : PaceEsti
 
 private class NoOpTestTranscriber : LocalTranscriber {
     override val updates: Flow<TranscriptUpdate> = emptyFlow()
+    override val status: StateFlow<TranscriptionEngineStatus> =
+        MutableStateFlow(TranscriptionEngineStatus.Disabled)
+
     override suspend fun start() = Unit
     override suspend fun stop() = Unit
 }
 
 private class FakeTranscriber : LocalTranscriber {
     private val flow = MutableSharedFlow<TranscriptUpdate>(extraBufferCapacity = 8)
-    override val updates: Flow<TranscriptUpdate> = flow
+    private val statusFlow = MutableStateFlow(TranscriptionEngineStatus.Disabled)
 
-    override suspend fun start() = Unit
-    override suspend fun stop() = Unit
+    override val updates: Flow<TranscriptUpdate> = flow
+    override val status: StateFlow<TranscriptionEngineStatus> = statusFlow
+
+    override suspend fun start() {
+        statusFlow.value = TranscriptionEngineStatus.Listening
+    }
+
+    override suspend fun stop() {
+        statusFlow.value = TranscriptionEngineStatus.Disabled
+    }
 
     fun emitFinal(text: String, atMs: Long) {
         flow.tryEmit(

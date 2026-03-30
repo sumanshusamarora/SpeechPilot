@@ -258,7 +258,7 @@ private fun DebugPanel(state: MainUiState) {
             DebugRow(label = "Smoothed heuristic", value = "%.1f est-WPM".format(state.smoothedWpm))
             DebugRow(label = "Transcript WPM", value = "%.1f text-WPM".format(state.transcriptRollingWpm))
             DebugRow(label = "Target", value = "%.0f est-WPM".format(debug.targetWpm))
-            DebugRow(label = "Transcription", value = debug.transcriptionStatus)
+            DebugRow(label = "Transcription", value = debug.transcriptionStatus.name.lowercase())
             DebugRow(label = "Last decision", value = debug.lastDecisionReason)
             DebugRow(label = "Cooldown", value = if (debug.isInCooldown) "active" else "clear")
             DebugRow(label = "Alert", value = if (state.alertActive) "triggered" else "suppressed/none")

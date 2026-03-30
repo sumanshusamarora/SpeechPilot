@@ -14,10 +14,10 @@ import com.speechpilot.settings.DataStoreAppSettings
 import com.speechpilot.settings.UserPreferences
 import com.speechpilot.transcription.AndroidSpeechRecognizerTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -31,27 +31,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
+    private var latestPreferences = UserPreferences()
     private var sessionManager: SpeechCoachSessionManager? = null
+    private var liveStateJob: Job? = null
 
     init {
         viewModelScope.launch {
-            val prefs: UserPreferences = appSettings.preferences.first()
-            val transcriber = if (prefs.localTranscriptDebugEnabled) {
-                AndroidSpeechRecognizerTranscriber(getApplication())
-            } else {
-                NoOpLocalTranscriber()
+            appSettings.preferences.collect { prefs ->
+                latestPreferences = prefs
+                val isSessionActive = sessionManager?.liveState?.value?.sessionState == SessionState.Active
+                if (!isSessionActive) {
+                    recreateSessionManager(prefs)
+                }
             }
-            val mgr = SpeechCoachSessionManager.create(
-                feedbackDispatcher = VibrationFeedbackDispatcher(getApplication()),
-                sessionRepository = repository,
-                feedbackDecision = ThresholdFeedbackDecision(
-                    targetWpm = prefs.targetWpm.toDouble(),
-                    tolerancePct = prefs.tolerancePct.toDouble(),
-                    cooldownMs = prefs.feedbackCooldownMs
-                ),
-                localTranscriber = transcriber
-            )
-            sessionManager = mgr
+        }
+    }
+
+    private fun recreateSessionManager(prefs: UserPreferences) {
+        liveStateJob?.cancel()
+        sessionManager?.release()
+
+        val transcriber = if (prefs.localTranscriptDebugEnabled) {
+            AndroidSpeechRecognizerTranscriber(getApplication())
+        } else {
+            NoOpLocalTranscriber()
+        }
+
+        val mgr = SpeechCoachSessionManager.create(
+            feedbackDispatcher = VibrationFeedbackDispatcher(getApplication()),
+            sessionRepository = repository,
+            feedbackDecision = ThresholdFeedbackDecision(
+                targetWpm = prefs.targetWpm.toDouble(),
+                tolerancePct = prefs.tolerancePct.toDouble(),
+                cooldownMs = prefs.feedbackCooldownMs
+            ),
+            localTranscriber = transcriber
+        )
+        sessionManager = mgr
+
+        liveStateJob = viewModelScope.launch {
             mgr.liveState.collect { live ->
                 _uiState.update { current ->
                     val isActive = live.sessionState == SessionState.Active
@@ -99,12 +117,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startSession(mode: SessionMode = SessionMode.Active) {
-        val mgr = sessionManager ?: return
         if (!_uiState.value.permissionGranted) {
             _uiState.update { it.copy(errorMessage = "Microphone permission is required to start a session.") }
             return
         }
+
+        if (sessionManager == null || sessionManager?.state?.value == SessionState.Idle) {
+            recreateSessionManager(latestPreferences)
+        }
+
         _uiState.update { it.copy(errorMessage = null) }
+        val mgr = sessionManager ?: return
         viewModelScope.launch { mgr.start(mode) }
     }
 
@@ -119,6 +142,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        liveStateJob?.cancel()
         sessionManager?.release()
     }
 }

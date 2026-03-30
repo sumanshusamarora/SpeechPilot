@@ -2,7 +2,7 @@
 
 A native Android application that provides real-time speech pace feedback to help speakers maintain a comfortable, clear delivery.
 
-All processing runs locally on-device. No backend, cloud, or external services required.
+All core coaching pipeline processing runs locally on-device. No backend, cloud, or external services are required for pace estimation/feedback.
 
 ---
 
@@ -101,13 +101,14 @@ app
 
 SpeechPilot now includes an **optional local transcript debug mode** for calibration.
 
-- Uses Android `SpeechRecognizer` with offline preference (`EXTRA_PREFER_OFFLINE=true`)
+- Uses Android `SpeechRecognizer` with offline preference (`EXTRA_PREFER_OFFLINE=true`) as a best-effort signal
 - Produces incremental transcript text during active sessions
 - Computes a separate rolling **transcript-derived WPM** from finalized recognized words
 - Keeps transcript WPM separate from the existing heuristic est-WPM signal
 - Is disabled by default and can be enabled in **Settings → Local transcript debug**
 
-> Notes: transcript quality/timing depends on on-device speech services and installed language packs.
+> Notes: transcript quality/timing and true offline behavior depend on on-device speech services and installed language packs.
+> Changes to the transcript debug toggle apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
 
 ---

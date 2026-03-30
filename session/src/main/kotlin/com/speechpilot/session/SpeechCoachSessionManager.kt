@@ -16,6 +16,7 @@ import com.speechpilot.segmentation.VadSpeechSegmenter
 import com.speechpilot.transcription.LocalTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RollingTranscriptWpmCalculator
+import com.speechpilot.transcription.TranscriptionEngineStatus
 import com.speechpilot.vad.EnergyBasedVad
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -75,7 +76,7 @@ class SpeechCoachSessionManager(
                     mode = mode,
                     isListening = true,
                     stats = SessionStats(startedAtMs = sessionStartMs),
-                    debugInfo = it.debugInfo.copy(transcriptionStatus = "starting")
+                    debugInfo = it.debugInfo.copy(transcriptionStatus = localTranscriber.status.value)
                 )
             }
             audioCapture.start()
@@ -178,10 +179,14 @@ class SpeechCoachSessionManager(
     private suspend fun startTranscriptionCollector() {
         try {
             localTranscriber.start()
-            _liveState.update {
-                it.copy(debugInfo = it.debugInfo.copy(transcriptionStatus = "listening"))
-            }
             transcriptionJob = managerScope.launch {
+                launch {
+                    localTranscriber.status.collect { status ->
+                        _liveState.update { current ->
+                            current.copy(debugInfo = current.debugInfo.copy(transcriptionStatus = status))
+                        }
+                    }
+                }
                 localTranscriber.updates.collect { update ->
                     val snapshot = transcriptWpmCalculator.onUpdate(update)
                     _liveState.update { current ->
@@ -194,7 +199,7 @@ class SpeechCoachSessionManager(
             }
         } catch (e: Exception) {
             _liveState.update {
-                it.copy(debugInfo = it.debugInfo.copy(transcriptionStatus = "unavailable"))
+                it.copy(debugInfo = it.debugInfo.copy(transcriptionStatus = TranscriptionEngineStatus.Unavailable))
             }
         }
     }
