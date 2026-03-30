@@ -29,5 +29,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(project(":vad"))
     androidTestImplementation(libs.androidx.junit)
 }

@@ -113,13 +113,21 @@ class SpeechCoachSessionManager(
                             FeedbackEvent.OnTarget -> false
                             null -> current.alertActive
                         }
+                        // Populate debug info if the decision engine supports it.
+                        val engine = feedbackDecision as? ThresholdFeedbackDecision
+                        val newDebugInfo = DebugPipelineInfo(
+                            targetWpm = engine?.currentTargetWpm() ?: current.debugInfo.targetWpm,
+                            lastDecisionReason = engine?.lastDecisionReason ?: current.debugInfo.lastDecisionReason,
+                            isInCooldown = engine?.isCooldownActive() ?: false
+                        )
                         current.copy(
                             isSpeechDetected = true,
                             currentWpm = metrics.estimatedWpm.toFloat(),
                             smoothedWpm = rollingPaceWindow.smoothedEstimatedWpm().toFloat(),
                             latestFeedback = feedback ?: current.latestFeedback,
                             alertActive = newAlertActive,
-                            stats = newStats
+                            stats = newStats,
+                            debugInfo = newDebugInfo
                         )
                     }
                 }

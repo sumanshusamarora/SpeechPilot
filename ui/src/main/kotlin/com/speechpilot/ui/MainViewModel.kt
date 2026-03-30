@@ -69,6 +69,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         alertActive = live.alertActive,
                         sessionMode = live.mode,
                         errorMessage = errorMessage,
+                        debugInfo = live.debugInfo,
                         statusText = when (live.sessionState) {
                             SessionState.Idle ->
                                 if (current.permissionGranted) "Ready" else "Microphone permission required"
