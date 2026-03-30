@@ -1,6 +1,7 @@
 package com.speechpilot.session
 
 import com.speechpilot.audio.AudioCapture
+import com.speechpilot.audio.AudioFrame
 import com.speechpilot.audio.MicrophoneCapture
 import com.speechpilot.data.SessionRecord
 import com.speechpilot.data.SessionRepository
@@ -26,10 +27,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.math.sqrt
 
 /**
  * Central coordinator for the speech coaching session lifecycle.
@@ -82,8 +86,29 @@ class SpeechCoachSessionManager(
             audioCapture.start()
             startTranscriptionCollector()
 
+            // Share frames between the frame-level activity monitor and the segmenter so
+            // AudioRecord is only opened once.
+            val sharedFrames = audioCapture.frames()
+                .shareIn(this, SharingStarted.Eagerly, replay = 0)
+
+            // Frame-level monitor: updates micLevel and isSpeechActive at a ~100 ms cadence.
+            // This runs in parallel with segmentation and keeps the UI feeling alive even when
+            // no complete speech segment has been emitted yet.
+            launch {
+                var frameCount = 0
+                sharedFrames.collect { frame ->
+                    frameCount++
+                    if (frameCount % FRAME_LEVEL_UPDATE_INTERVAL == 0) {
+                        val rms = computeFrameRms(frame.samples)
+                        val level = (rms / MAX_DISPLAY_RMS).coerceIn(0.0, 1.0).toFloat()
+                        val speechActive = rms >= VAD_SPEECH_THRESHOLD
+                        _liveState.update { it.copy(micLevel = level, isSpeechActive = speechActive) }
+                    }
+                }
+            }
+
             try {
-                segmenter.segment(audioCapture.frames()).collect { segment ->
+                segmenter.segment(sharedFrames).collect { segment ->
                     val metrics = paceEstimator.estimate(segment)
                     rollingPaceWindow.update(metrics)
                     val feedback = feedbackDecision.evaluate(metrics)
@@ -163,6 +188,13 @@ class SpeechCoachSessionManager(
     }
 
     companion object {
+        /** Update mic level / speech-active state every N frames (~32 ms/frame → every ~100 ms). */
+        internal const val FRAME_LEVEL_UPDATE_INTERVAL = 3
+        /** RMS ceiling used to normalise micLevel to [0, 1]. Covers typical speech levels. */
+        internal const val MAX_DISPLAY_RMS = 5_000.0
+        /** RMS threshold that classifies a frame as speech. Matches EnergyBasedVad default. */
+        internal const val VAD_SPEECH_THRESHOLD = 300.0
+
         fun create(
             feedbackDispatcher: FeedbackDispatcher? = null,
             sessionRepository: SessionRepository? = null,
@@ -174,6 +206,13 @@ class SpeechCoachSessionManager(
             feedbackDecision = feedbackDecision,
             localTranscriber = localTranscriber
         )
+    }
+
+    private fun computeFrameRms(samples: ShortArray): Double {
+        if (samples.isEmpty()) return 0.0
+        var sum = 0.0
+        for (s in samples) sum += s.toLong() * s
+        return sqrt(sum / samples.size)
     }
 
     private suspend fun startTranscriptionCollector() {

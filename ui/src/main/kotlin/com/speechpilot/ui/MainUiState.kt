@@ -8,7 +8,12 @@ data class MainUiState(
     val statusText: String = "Ready",
     val isSessionActive: Boolean = false,
     val isListening: Boolean = false,
+    /** True while the VAD currently classifies audio as speech (live, frame-cadence). */
+    val isSpeechActive: Boolean = false,
+    /** True once speech has been detected at any point during this session. */
     val isSpeechDetected: Boolean = false,
+    /** Normalized microphone RMS level [0, 1]. Updated at frame cadence during sessions. */
+    val micLevel: Float = 0f,
     /** Most recent raw estimated WPM. Approximate proxy — not exact WPM. */
     val currentWpm: Float = 0f,
     /** EMA-smoothed estimated WPM. Approximate proxy — not exact WPM. */

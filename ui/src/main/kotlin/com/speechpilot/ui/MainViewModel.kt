@@ -81,7 +81,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     current.copy(
                         isSessionActive = isActive,
                         isListening = live.isListening,
+                        isSpeechActive = live.isSpeechActive,
                         isSpeechDetected = live.isSpeechDetected,
+                        micLevel = live.micLevel,
                         currentWpm = live.currentWpm,
                         smoothedWpm = live.smoothedWpm,
                         transcriptText = live.transcriptText,
@@ -97,7 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 if (current.permissionGranted) "Ready" else "Microphone permission required"
                             SessionState.Starting -> "Starting…"
                             SessionState.Active ->
-                                if (live.isSpeechDetected) "Speech detected" else "Listening…"
+                                if (live.isSpeechActive) "Speaking…" else "Listening…"
                             SessionState.Stopping -> "Stopping…"
                             is SessionState.Error -> "Session error"
                         }

@@ -1,5 +1,6 @@
 package com.speechpilot.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,6 +17,9 @@ private enum class AppScreen { MAIN, SETTINGS, HISTORY }
  * A lightweight state-based switcher is used instead of a nav library to
  * keep the dependency footprint minimal in Phase 1. Navigation state is held
  * in memory and resets to MAIN on configuration changes.
+ *
+ * [BackHandler] intercepts the system back gesture/button whenever a sub-screen
+ * is active, returning the user to the main screen instead of exiting the app.
  */
 @Composable
 fun AppNavigation(
@@ -24,6 +28,11 @@ fun AppNavigation(
     historyViewModel: HistoryViewModel = viewModel()
 ) {
     var currentScreen by remember { mutableStateOf(AppScreen.MAIN) }
+
+    // Intercept system back on sub-screens so the user returns to main rather than exiting.
+    BackHandler(enabled = currentScreen != AppScreen.MAIN) {
+        currentScreen = AppScreen.MAIN
+    }
 
     when (currentScreen) {
         AppScreen.MAIN -> MainScreen(
