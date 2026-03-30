@@ -25,12 +25,12 @@ android {
 dependencies {
     implementation(project(":audio"))
     implementation(project(":vad"))
-    implementation(project(":segmentation"))
+    api(project(":segmentation"))
     implementation(project(":pace"))
-    implementation(project(":feedback"))
+    api(project(":feedback"))
     implementation(project(":data"))
     implementation(project(":settings"))
-    implementation(project(":transcription"))
+    api(project(":transcription"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
