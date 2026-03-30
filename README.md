@@ -95,17 +95,70 @@ app
 
 ## Releasing
 
-Releases are automated via GitHub Actions. To publish a release APK:
+Releases are automated via GitHub Actions. To publish a signed release APK:
 
-1. Ensure the commit you want to release is on `main`.
-2. Create and push a tag matching the pattern `release-v<major>.<minor>.<patch>`:
+### 1. Generate a release keystore (one-time setup)
+
+```bash
+keytool -genkeypair \
+  -v \
+  -keystore release-keystore.jks \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000 \
+  -alias my-release-key
+```
+
+Keep `release-keystore.jks` safe and **do not commit it** to the repository.
+
+### 2. Base64-encode the keystore
+
+```bash
+# macOS
+base64 -i release-keystore.jks | tr -d '\n'
+
+# Linux
+base64 -w 0 release-keystore.jks
+```
+
+### 3. Add GitHub repository secrets
+
+Go to **Settings → Secrets and variables → Actions** and add:
+
+| Secret name | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | Base64-encoded content of `release-keystore.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password chosen during `keytool` |
+| `ANDROID_KEY_ALIAS` | Key alias (e.g. `my-release-key`) |
+| `ANDROID_KEY_PASSWORD` | Key password chosen during `keytool` |
+
+### 4. Create and push a release tag
+
+Ensure the commit you want to release is on `main`, then:
 
 ```bash
 git tag release-v1.0.0
 git push origin release-v1.0.0
 ```
 
-The workflow builds the release APK, creates a GitHub Release, and attaches the APK as an artifact. Release notes are auto-generated from commits since the previous tag.
+The workflow will:
+1. Decode `ANDROID_KEYSTORE_BASE64` into a temporary keystore file
+2. Pass the keystore path and credentials to Gradle via environment variables
+3. Build a properly signed `app-release.apk`
+4. Upload it as `SpeechPilot-v1.0.0-release.apk` to the GitHub Release
+
+### How the workflow handles signing
+
+The workflow decodes the base64 keystore to `$RUNNER_TEMP/release-keystore.jks` and exports the following environment variables consumed by Gradle:
+
+- `ANDROID_KEYSTORE_PATH`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+If any of these are missing, the Gradle build fails with a clear error. The build will never silently produce an unsigned APK in CI.
+
+> **Debug builds are unaffected.** Signing configuration is only applied when `ANDROID_KEYSTORE_PATH` is set.
 
 ---
 
