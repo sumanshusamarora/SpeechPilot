@@ -11,8 +11,8 @@
         android:name=".SpeechPilotApp"
         android:label="@string/app_name"
         android:theme="@style/Theme.SpeechPilot"
-        android:icon="@drawable/ic_speechpilot_logo"
-        android:roundIcon="@drawable/ic_speechpilot_logo"
+        android:icon="@drawable/speechpilot_brand_logo"
+        android:roundIcon="@drawable/speechpilot_brand_logo"
         android:allowBackup="true"
         android:supportsRtl="true">
 
