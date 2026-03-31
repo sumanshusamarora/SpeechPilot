@@ -66,7 +66,7 @@ private fun HistoryContent(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Image(
-                    painter = painterResource(id = com.speechpilot.ui.R.drawable.ic_speechpilot_logo),
+                    painter = painterResource(id = com.speechpilot.ui.R.drawable.speechpilot_brand_logo),
                     contentDescription = "SpeechPilot logo",
                     modifier = Modifier
                         .size(38.dp)
