@@ -42,10 +42,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.speechpilot.feedback.FeedbackEvent
+import com.speechpilot.session.PaceSignalSource
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.TranscriptDebugStatus
 
@@ -171,18 +173,21 @@ private fun MainContent(
 
             item { SessionStatusCard(state = state) }
 
-            val displayWpm = if (state.smoothedWpm > 0f) state.smoothedWpm else state.currentWpm
-            if (displayWpm > 0f) {
-                item {
-                    LivePaceCard(
-                        displayWpm = displayWpm,
-                        segmentCount = state.segmentCount
-                    )
-                }
+            if (state.transcriptDebugEnabled) {
+                item { TranscriptCard(state = state) }
             }
 
+            item { LivePaceCard(state = state) }
+
             state.latestFeedback?.let { feedback ->
-                item { FeedbackChip(feedback = feedback, isAlertActive = state.alertActive) }
+                item {
+                    FeedbackChip(
+                        feedback = feedback,
+                        isAlertActive = state.alertActive,
+                        activePaceSource = state.debugInfo.activePaceSource,
+                        paceSourceReason = state.debugInfo.paceSourceReason
+                    )
+                }
             }
 
             state.errorMessage?.let { error ->
@@ -309,7 +314,37 @@ private fun SessionStatusCard(state: MainUiState) {
 }
 
 @Composable
-private fun LivePaceCard(displayWpm: Float, segmentCount: Int) {
+private fun TranscriptCard(state: MainUiState) {
+    val transcript = resolveTranscriptSurfacePresentation(state)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = transcript.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = transcript.helperText,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = transcript.bodyText ?: "No final words yet.",
+                style = MaterialTheme.typography.bodyLarge,
+                fontStyle = if (transcript.showAsFinal) FontStyle.Normal else FontStyle.Italic,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun LivePaceCard(state: MainUiState) {
+    val pace = resolvePaceMetricPresentation(state)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -321,23 +356,38 @@ private fun LivePaceCard(displayWpm: Float, segmentCount: Int) {
                 .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Live Pace", style = MaterialTheme.typography.labelLarge)
+            Text(pace.headline, style = MaterialTheme.typography.labelLarge)
             Text(
-                text = "~%.0f WPM".format(displayWpm),
+                text = pace.primaryValue,
                 style = MaterialTheme.typography.displaySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Text(
-                text = "$segmentCount segment${if (segmentCount == 1) "" else "s"}",
+                text = pace.primaryLabel,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                text = pace.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                text = "${state.segmentCount} segment${if (state.segmentCount == 1) "" else "s"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
         }
     }
 }
 
 @Composable
-private fun FeedbackChip(feedback: FeedbackEvent, isAlertActive: Boolean) {
+private fun FeedbackChip(
+    feedback: FeedbackEvent,
+    isAlertActive: Boolean,
+    activePaceSource: PaceSignalSource,
+    paceSourceReason: String
+) {
     val message = when (feedback) {
         FeedbackEvent.SlowDown -> "⚠ Slow down"
         FeedbackEvent.SpeedUp -> "⚠ Speed up"
@@ -359,12 +409,32 @@ private fun FeedbackChip(feedback: FeedbackEvent, isAlertActive: Boolean) {
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyLarge,
-            color = contentColor,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
-        )
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                color = contentColor
+            )
+            if (activePaceSource == PaceSignalSource.Transcript) {
+                Text(
+                    text = "Using text WPM for coaching decisions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor
+                )
+            } else if (activePaceSource == PaceSignalSource.Heuristic) {
+                val fallbackText = when (paceSourceReason) {
+                    "transcript-pending-fallback" -> "Transcript pending — using heuristic pace."
+                    "transcript-unavailable-fallback" -> "Transcript unavailable — using heuristic pace."
+                    "transcript-error-fallback" -> "Transcript error — using heuristic pace."
+                    else -> "Using heuristic pace for coaching decisions."
+                }
+                Text(
+                    text = fallbackText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor
+                )
+            }
+        }
     }
 }
 
@@ -400,63 +470,36 @@ private fun DebugPanel(state: MainUiState) {
             val rows = listOf(
                 "Speech active" to speechLabel,
                 "Mic level" to "%.2f".format(state.micLevel),
-                "VAD frame RMS" to "%.1f".format(debug.vadFrameRms),
-                "VAD threshold" to "%.0f".format(debug.vadThreshold),
-                "VAD frame class" to debug.vadFrameClassification.name.lowercase(),
-                "Segment open" to if (debug.isSegmentOpen) "yes" else "no",
-                "Open seg frames" to debug.openSegmentFrameCount.toString(),
-                "Open seg silence" to debug.openSegmentSilenceFrameCount.toString(),
-                "Finalized segs" to debug.finalizedSegmentsCount.toString(),
-                "Heuristic pace" to "%.1f est-WPM".format(state.currentWpm),
-                "Smoothed heuristic" to "%.1f est-WPM".format(state.smoothedWpm),
-                "Transcript debug" to if (state.transcriptDebugEnabled) "enabled" else "disabled",
-                "Transcript status" to transcriptStatusLabel(state.transcriptDebug.status),
                 "Transcript engine" to state.transcriptDebug.engineStatus.name.lowercase(),
-                "Partial transcript" to if (state.transcriptDebug.partialTranscriptPresent) "yes" else "no",
-                "Final transcript words" to state.transcriptDebug.finalizedWordCount.toString(),
-                "Rolling transcript words" to state.transcriptDebug.rollingWordCount.toString(),
-                "Transcript WPM" to if (state.transcriptDebug.wpmPendingFinalRecognition) {
+                "Transcript status" to transcriptStatusLabel(state.transcriptDebug.status),
+                "Text WPM" to if (state.transcriptDebug.wpmPendingFinalRecognition) {
                     "pending final recognition"
                 } else {
                     "%.1f text-WPM".format(state.transcriptDebug.rollingWpm)
                 },
-                "Transcript last update" to (state.transcriptDebug.lastUpdateAtMs?.toString() ?: "none"),
-                "Target" to "%.0f est-WPM".format(debug.targetWpm),
-                "Transcription" to debug.transcriptionStatus.name.lowercase(),
+                "Heuristic pace" to if (debug.heuristicWpm > 0.0) {
+                    "%.1f est-WPM".format(debug.heuristicWpm)
+                } else {
+                    "none"
+                },
+                "Decision signal" to debug.activePaceSource.name.lowercase(),
+                "Source reason" to debug.paceSourceReason,
+                "Fallback active" to if (debug.fallbackActive) "yes" else "no",
+                "Transcript ready" to if (debug.transcriptReadyForDecision) "yes" else "no",
+                "Decision pace" to if (debug.decisionWpm > 0.0) {
+                    "%.1f WPM".format(debug.decisionWpm)
+                } else {
+                    "none"
+                },
+                "Target" to "%.0f WPM".format(debug.targetWpm),
                 "Last decision" to debug.lastDecisionReason,
-                "Cooldown" to if (debug.isInCooldown) "active" else "clear",
-                "Alert" to if (state.alertActive) "triggered" else "suppressed/none"
+                "Cooldown" to if (debug.isInCooldown) "active" else "clear"
             )
 
             rows.forEach { (label, value) ->
                 DebugRow(label = label, value = value)
             }
 
-            if (state.transcriptDebugEnabled) {
-                Spacer(modifier = Modifier.height(6.dp))
-                val transcriptText = state.transcriptDebug.transcriptText
-                val transcriptMessage = when {
-                    transcriptText.isNotBlank() -> transcriptText
-                    state.transcriptDebug.status == TranscriptDebugStatus.Disabled ->
-                        "Transcript debug disabled in settings."
-
-                    state.transcriptDebug.status == TranscriptDebugStatus.Unavailable ->
-                        "Transcription unavailable on this device/runtime."
-
-                    state.transcriptDebug.status == TranscriptDebugStatus.Error ->
-                        "Transcription error. Engine will retry while session is active."
-
-                    state.transcriptDebug.partialTranscriptPresent ->
-                        "Partial transcript available, waiting for final recognition."
-
-                    else -> "No transcript text recognized yet."
-                }
-                Text(
-                    text = "Transcript: $transcriptMessage",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
     }
 }

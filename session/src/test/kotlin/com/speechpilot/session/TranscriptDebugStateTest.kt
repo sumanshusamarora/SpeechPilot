@@ -57,4 +57,30 @@ class TranscriptDebugStateTest {
 
         assertEquals(TranscriptDebugStatus.FinalAvailable, status)
     }
+
+    @Test
+    fun `unavailable status when recognizer unavailable`() {
+        val status = resolveTranscriptDebugStatus(
+            debugEnabled = true,
+            engineStatus = TranscriptionEngineStatus.Unavailable,
+            isSessionListening = true,
+            partialTranscriptPresent = false,
+            finalizedWordCount = 0
+        )
+
+        assertEquals(TranscriptDebugStatus.Unavailable, status)
+    }
+
+    @Test
+    fun `error status when recognizer reports error`() {
+        val status = resolveTranscriptDebugStatus(
+            debugEnabled = true,
+            engineStatus = TranscriptionEngineStatus.Error,
+            isSessionListening = true,
+            partialTranscriptPresent = true,
+            finalizedWordCount = 0
+        )
+
+        assertEquals(TranscriptDebugStatus.Error, status)
+    }
 }

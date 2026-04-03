@@ -144,20 +144,21 @@ FeedbackMode:  Vibration                         (Phase 1 only)
 
 ### `transcription`
 
-Optional local-first transcript path for developer calibration.
+Optional local-first transcript path exposed directly in live UX when enabled.
 
 - `LocalTranscriber` is the abstraction for replaceable transcription engines.
 - `AndroidSpeechRecognizerTranscriber` is the Phase 1 implementation (device recognizer, offline-preferred best effort).
 - `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only.
-- `TranscriptDebugState` exposes typed transcript runtime diagnostics (status + counters + pending flags) to keep behavior explicit in the debug UI.
+- `TranscriptDebugState` exposes typed transcript runtime diagnostics (status + counters + pending flags) so UI can render explicit transcript states honestly.
 
-**Important:** transcript-derived WPM is a separate debug metric and is not used to drive feedback decisions in this phase.
+**Current behavior:** transcript-derived WPM is the **primary displayed pace metric** in transcript mode when finalized words exist, and now also becomes the **feedback decision signal** once transcript readiness is reached.
+**Fallback behavior:** if transcript is pending/unavailable/error, decisioning falls back explicitly to heuristic pace (or no-signal when neither is usable).
 
 Limitations:
 - Recognition quality, offline availability, and latency vary by device/runtime speech services.
 - Partial hypotheses can be revised; only final hypotheses contribute to transcript WPM.
 - Transcript text is in-memory only for the active session.
-- Some devices/services may emit partial hypotheses for long stretches before producing finals; during this period transcript WPM intentionally remains pending/zero.
+- Some devices/services may emit partial hypotheses for long stretches before producing finals; during this period transcript WPM intentionally remains pending and UI states this explicitly.
 
 ### `data`
 
@@ -239,11 +240,17 @@ MicrophoneCapture ──► AudioFrame (Flow, shared via shareIn)
 | `micLevel` | Normalized microphone RMS in [0.0, 1.0]. Updated at frame cadence (~100 ms). Drives the audio level bar visualization. |
 | `currentWpm` | Most recent raw estimated WPM (syllable-rate proxy) |
 | `smoothedWpm` | EMA-smoothed estimated WPM (reduces per-segment noise) |
-| `transcriptDebug` | `TranscriptDebugState` (typed transcript status, text preview, counters, pending flags, last update timestamp) |
+| `transcriptDebug` | `TranscriptDebugState` (typed transcript status, text preview, counters, pending flags, last update timestamp; powers transcript card + primary text-WPM selection) |
 | `latestFeedback` | Most recent `FeedbackEvent`, if any |
 | `alertActive` | True when the most recent feedback was SlowDown or SpeedUp |
 | `stats` | Session-level `SessionStats` snapshot |
 | `debugInfo` | `DebugPipelineInfo` — lightweight debug snapshot (see below) |
+
+`debugInfo` also carries pace-source diagnostics used for user/developer transparency:
+- `activePaceSource` (`transcript` / `heuristic` / `none`)
+- `paceSourceReason` (why this source was selected)
+- `fallbackActive` and `transcriptReadyForDecision`
+- `decisionWpm`, `transcriptWpm`, and `heuristicWpm` for side-by-side calibration
 
 ### Live Audio Activity Monitoring
 
