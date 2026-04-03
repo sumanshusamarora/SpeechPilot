@@ -146,19 +146,54 @@ FeedbackMode:  Vibration                         (Phase 1 only)
 
 Optional local-first transcript path exposed directly in live UX when enabled.
 
-- `LocalTranscriber` is the abstraction for replaceable transcription engines.
-- `AndroidSpeechRecognizerTranscriber` is the Phase 1 implementation (device recognizer, offline-preferred best effort).
+#### Backend architecture
+
+The transcription module uses a **two-tier backend strategy**:
+
+| Class | Role |
+|---|---|
+| `VoskLocalTranscriber` | **Preferred** dedicated backend. On-device STT using Vosk. Deterministic, no cloud dependency. Requires model assets. |
+| `AndroidSpeechRecognizerTranscriber` | **Fallback** backend. Android `SpeechRecognizer` API, offline-preferred best effort. Activated automatically when Vosk model is absent. |
+| `RoutingLocalTranscriber` | **Router**. Tries the Vosk backend first; falls back to `AndroidSpeechRecognizerTranscriber` if Vosk reports `ModelUnavailable`. Exposes `activeBackend` so the rest of the app can observe which path is running. |
+| `NoOpLocalTranscriber` | Disabled state (transcript debug mode off). |
+
+`LocalTranscriber.activeBackend: StateFlow<TranscriptionBackend>` exposes which backend is live (`DedicatedLocalStt`, `AndroidSpeechRecognizer`, or `None`).
+
+#### Backend selection (performed by `RoutingLocalTranscriber` at session start)
+
+1. Start `VoskLocalTranscriber`.
+2. If it reports `TranscriptionEngineStatus.ModelUnavailable` (model files not present), stop it and start `AndroidSpeechRecognizerTranscriber`.
+3. Route `updates` and `status` flows from the selected backend.
+4. Update `activeBackend` to reflect the selected path.
+
+#### Engine statuses
+
+`TranscriptionEngineStatus` has been extended to cover the full lifecycle of both backends:
+
+| Status | Meaning |
+|---|---|
+| `Disabled` | Not running |
+| `InitializingModel` | Vosk backend loading model |
+| `ModelUnavailable` | Vosk model assets not found on device |
+| `Listening` | Engine active and listening |
+| `Restarting` | Auto-restart at result boundary (SpeechRecognizer) |
+| `Unavailable` | Device/service does not provide recognition |
+| `Error` | Recognition error |
+
+#### Current runtime limitations
+
+- `VoskLocalTranscriber` is architecturally complete and checks model availability, but the actual Vosk recognition loop requires: (a) the Vosk Android AAR library added to `transcription/build.gradle.kts`, and (b) model assets placed in `context.filesDir/vosk-model-small-en-us`.
+- Until model assets are present, `VoskLocalTranscriber` reports `ModelUnavailable` immediately after `start()` and `RoutingLocalTranscriber` activates `AndroidSpeechRecognizerTranscriber` automatically.
+- `AndroidSpeechRecognizerTranscriber` behavior (quality, offline availability, latency) varies by device and speech service provider.
+
+#### Other transcript components
+
 - `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only.
-- `TranscriptDebugState` exposes typed transcript runtime diagnostics (status + counters + pending flags) so UI can render explicit transcript states honestly.
+- `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, and pending flags.
 
-**Current behavior:** transcript-derived WPM is the **primary displayed pace metric** in transcript mode when finalized words exist, and now also becomes the **feedback decision signal** once transcript readiness is reached.
-**Fallback behavior:** if transcript is pending/unavailable/error, decisioning falls back explicitly to heuristic pace (or no-signal when neither is usable).
+**Current behavior:** transcript-derived WPM is the **primary displayed pace metric** in transcript mode when finalized words exist, and becomes the **feedback decision signal** once transcript readiness is reached.
 
-Limitations:
-- Recognition quality, offline availability, and latency vary by device/runtime speech services.
-- Partial hypotheses can be revised; only final hypotheses contribute to transcript WPM.
-- Transcript text is in-memory only for the active session.
-- Some devices/services may emit partial hypotheses for long stretches before producing finals; during this period transcript WPM intentionally remains pending and UI states this explicitly.
+**Fallback behavior:** if transcript is pending/unavailable/model-missing/error, decisioning falls back explicitly to heuristic pace (or no-signal when neither is usable).
 
 ### `data`
 

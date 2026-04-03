@@ -21,9 +21,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Debug-oriented transcriber built on Android's [SpeechRecognizer].
+ * Fallback transcriber built on Android's [SpeechRecognizer].
  *
- * `EXTRA_PREFER_OFFLINE=true` is requested, but behavior remains recognition-service dependent.
+ * This is the **compatibility / fallback** backend. It is used when the preferred dedicated
+ * on-device STT backend ([VoskLocalTranscriber]) is unavailable or its model assets have not
+ * been placed on the device.
+ *
+ * `EXTRA_PREFER_OFFLINE=true` is requested, but recognition quality and offline availability
+ * remain recognition-service dependent and vary by device. This is the fundamental reason the
+ * dedicated Vosk backend is preferred for reliable local transcription.
  */
 class AndroidSpeechRecognizerTranscriber(
     context: Context,
@@ -43,6 +49,9 @@ class AndroidSpeechRecognizerTranscriber(
 
     private val _status = MutableStateFlow(TranscriptionEngineStatus.Disabled)
     override val status: StateFlow<TranscriptionEngineStatus> = _status.asStateFlow()
+
+    override val activeBackend: StateFlow<TranscriptionBackend> =
+        MutableStateFlow(TranscriptionBackend.AndroidSpeechRecognizer).asStateFlow()
 
     @Volatile
     private var shouldListen = false

@@ -15,6 +15,8 @@ import com.speechpilot.settings.DataStoreAppSettings
 import com.speechpilot.settings.UserPreferences
 import com.speechpilot.transcription.AndroidSpeechRecognizerTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
+import com.speechpilot.transcription.RoutingLocalTranscriber
+import com.speechpilot.transcription.VoskLocalTranscriber
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,7 +56,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sessionManager?.release()
 
         val transcriber = if (prefs.localTranscriptDebugEnabled) {
-            AndroidSpeechRecognizerTranscriber(getApplication())
+            RoutingLocalTranscriber(
+                primaryTranscriber = VoskLocalTranscriber.create(getApplication()),
+                fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
+            )
         } else {
             NoOpLocalTranscriber()
         }

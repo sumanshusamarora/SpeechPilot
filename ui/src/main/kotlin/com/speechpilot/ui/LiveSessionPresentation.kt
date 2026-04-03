@@ -42,6 +42,14 @@ internal fun resolveTranscriptSurfacePresentation(state: MainUiState): Transcrip
             bodyText = "This device/runtime does not currently provide local recognition."
         )
 
+        TranscriptDebugStatus.ModelUnavailable -> TranscriptSurfacePresentation(
+            title = "Transcript",
+            helperText = "Dedicated STT model not installed",
+            bodyText = "Vosk model assets are required for on-device transcription. " +
+                "Place model files in the app's files directory to enable the dedicated backend. " +
+                "Using Android SpeechRecognizer as fallback."
+        )
+
         TranscriptDebugStatus.Error -> TranscriptSurfacePresentation(
             title = "Transcript",
             helperText = "Transcription unavailable",

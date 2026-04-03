@@ -47,7 +47,8 @@ fun selectPaceSignal(
         }
     }
 
-    if (transcriptStatus == TranscriptDebugStatus.Unavailable) {
+    if (transcriptStatus == TranscriptDebugStatus.Unavailable ||
+        transcriptStatus == TranscriptDebugStatus.ModelUnavailable) {
         return if (heuristicAvailable) {
             PaceSignalSelection(
                 source = PaceSignalSource.Heuristic,

@@ -470,6 +470,7 @@ private fun DebugPanel(state: MainUiState) {
             val rows = listOf(
                 "Speech active" to speechLabel,
                 "Mic level" to "%.2f".format(state.micLevel),
+                "Transcript backend" to state.transcriptDebug.activeBackend.name.lowercase().replace('_', '-'),
                 "Transcript engine" to state.transcriptDebug.engineStatus.name.lowercase(),
                 "Transcript status" to transcriptStatusLabel(state.transcriptDebug.status),
                 "Text WPM" to if (state.transcriptDebug.wpmPendingFinalRecognition) {
@@ -510,6 +511,7 @@ private fun transcriptStatusLabel(status: TranscriptDebugStatus): String = when 
     TranscriptDebugStatus.WaitingForSpeech -> "waiting for speech"
     TranscriptDebugStatus.PartialAvailable -> "partial transcript available"
     TranscriptDebugStatus.FinalAvailable -> "final transcript available"
+    TranscriptDebugStatus.ModelUnavailable -> "model unavailable — using fallback"
     TranscriptDebugStatus.Unavailable -> "unavailable"
     TranscriptDebugStatus.Error -> "error"
 }

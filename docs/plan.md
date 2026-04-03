@@ -215,6 +215,56 @@
 - [x] Surface new diagnostics in the debug panel (`MainScreen`)
 - [x] Add deterministic unit tests for segmentation debug snapshots and session debug initialization/finalized-segment reporting
 
+---
+
+## Iteration 16 — Transcription Backend Strategy: Vosk-First with Android SR Fallback ✅
+
+**Goal:** Address the root cause of unreliable transcription — replace direct dependence on `AndroidSpeechRecognizer` as the primary transcript path with a dedicated on-device STT architecture.
+
+**Diagnosis:**
+- Android `SpeechRecognizer` is device/service-dependent: offline mode is a hint, not a guarantee
+- Recognition quality, latency, and session continuity vary unpredictably across devices
+- The app fell back to heuristic pace too often because transcript was unreliable, not because the architecture was wrong
+- The fix is to make dedicated on-device STT (Vosk) the preferred backend and demote `AndroidSpeechRecognizer` to fallback
+
+**Changes:**
+- [x] Add `TranscriptionBackend` enum (`DedicatedLocalStt`, `AndroidSpeechRecognizer`, `None`)
+- [x] Extend `TranscriptionEngineStatus` with `InitializingModel` and `ModelUnavailable` to cover Vosk lifecycle states
+- [x] Add `activeBackend: StateFlow<TranscriptionBackend>` to `LocalTranscriber` interface
+- [x] Implement `VoskLocalTranscriber` — preferred dedicated on-device STT backend:
+  - Checks for Vosk model assets at `context.filesDir/vosk-model-small-en-us`
+  - Reports `ModelUnavailable` immediately when model directory is absent
+  - Architecture is production-ready for Vosk library integration (see TODO markers in `runRecognition()`)
+  - `activeBackend` is always `DedicatedLocalStt`
+- [x] Implement `RoutingLocalTranscriber` — automatic backend selection at session start:
+  - Tries `VoskLocalTranscriber` (preferred)
+  - Falls back to `AndroidSpeechRecognizerTranscriber` when Vosk reports `ModelUnavailable`
+  - Exposes which backend is active via `activeBackend`
+- [x] Demote `AndroidSpeechRecognizerTranscriber` to explicit fallback/compatibility role (updated KDoc)
+- [x] Update `TranscriptDebugState` to include `activeBackend` field and `ModelUnavailable` status
+- [x] Update `TranscriptDebugStatus` with `ModelUnavailable` case
+- [x] Update `resolveTranscriptDebugStatus` to handle `InitializingModel` and `ModelUnavailable`
+- [x] Update `PaceSignalSelector` to treat `ModelUnavailable` as unavailable (fallback to heuristic)
+- [x] Update `SpeechCoachSessionManager` to collect and surface `activeBackend` from the transcriber
+- [x] Update `MainViewModel` to use `RoutingLocalTranscriber` (Vosk primary + Android SR fallback)
+- [x] Update `LiveSessionPresentation` with `ModelUnavailable` status text
+- [x] Update debug panel to show active backend (`Transcript backend` row)
+- [x] Add `VoskLocalTranscriberTest`: model availability checks, `ModelUnavailable` status on absent model, lifecycle
+- [x] Add `RoutingLocalTranscriberTest`: primary backend selection, fallback activation, stop/restart behavior
+- [x] Extend `TranscriptDebugStateTest` with `ModelUnavailable` and `InitializingModel` cases
+- [x] Extend `PaceSignalSelectorTest` with `ModelUnavailable` fallback case
+- [x] Update `SpeechCoachSessionManagerTest` stubs to satisfy updated `LocalTranscriber` interface
+- [x] Update README, `phase1_architecture.md`, `plan.md`
+
+**Remaining limitations:**
+- `VoskLocalTranscriber.runRecognition()` contains `TODO: Vosk API` placeholder loops — actual Vosk recognition is not yet active. To enable:
+  1. Add `com.alphacephei:vosk-android:0.3.47@aar` and `net.java.dev.jna:jna:5.13.0@aar` to `transcription/build.gradle.kts`
+  2. Place Vosk model assets in `context.filesDir/vosk-model-small-en-us`
+  3. Implement the `TODO: Vosk API` blocks in `VoskLocalTranscriber`
+- Until model assets are present, `RoutingLocalTranscriber` automatically activates `AndroidSpeechRecognizerTranscriber` as fallback with no user action required
+
+
+
 ## Iteration 7 — Polish and QA
 
 **Goal:** Release-candidate quality.
