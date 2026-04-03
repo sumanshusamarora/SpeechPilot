@@ -114,7 +114,14 @@ class SpeechCoachSessionManager(
                     debugInfo = it.debugInfo.copy(
                         targetWpm = debugTarget,
                         transcriptionStatus = localTranscriber.status.value,
-                        vadThreshold = vadThreshold
+                        vadThreshold = vadThreshold,
+                        activePaceSource = PaceSignalSource.None,
+                        paceSourceReason = "session-started-no-signal",
+                        fallbackActive = false,
+                        transcriptReadyForDecision = false,
+                        decisionWpm = 0.0,
+                        transcriptWpm = 0.0,
+                        heuristicWpm = 0.0
                     )
                 )
             }
@@ -170,8 +177,24 @@ class SpeechCoachSessionManager(
                 segmenter.segment(sharedFrames).collect { segment ->
                     val metrics = paceEstimator.estimate(segment)
                     rollingPaceWindow.update(metrics)
-                    val feedback = feedbackDecision.evaluate(metrics)
                     val durationMs = System.currentTimeMillis() - sessionStartMs
+                    val heuristicWpm = rollingPaceWindow.smoothedEstimatedWpm()
+                        .takeIf { it > 0.0 } ?: metrics.estimatedWpm
+                    val currentState = _liveState.value
+                    val paceSelection = selectPaceSignal(
+                        transcriptEnabled = currentState.transcriptDebug.debugEnabled,
+                        transcriptStatus = currentState.transcriptDebug.status,
+                        transcriptWpm = currentState.transcriptDebug.rollingWpm.toDouble(),
+                        transcriptFinalizedWordCount = currentState.transcriptDebug.finalizedWordCount,
+                        transcriptRollingWordCount = currentState.transcriptDebug.rollingWordCount,
+                        heuristicWpm = heuristicWpm
+                    )
+                    val feedback = feedbackDecision.evaluate(
+                        asDecisionMetrics(
+                            selection = paceSelection,
+                            windowDurationMs = metrics.windowDurationMs
+                        )
+                    )
 
                     if (feedback != null && _liveState.value.mode == SessionMode.Active) {
                         feedbackDispatcher?.dispatch(feedback)
@@ -196,6 +219,13 @@ class SpeechCoachSessionManager(
                             targetWpm = engine?.currentTargetWpm() ?: current.debugInfo.targetWpm,
                             lastDecisionReason = engine?.lastDecisionReason ?: current.debugInfo.lastDecisionReason,
                             isInCooldown = engine?.isCooldownActive() ?: false,
+                            activePaceSource = paceSelection.source,
+                            paceSourceReason = paceSelection.reason,
+                            fallbackActive = paceSelection.fallbackActive,
+                            transcriptReadyForDecision = paceSelection.transcriptReady,
+                            decisionWpm = paceSelection.selectedWpm,
+                            transcriptWpm = current.transcriptDebug.rollingWpm.toDouble(),
+                            heuristicWpm = heuristicWpm,
                             transcriptionStatus = current.debugInfo.transcriptionStatus,
                             vadFrameRms = current.debugInfo.vadFrameRms,
                             vadThreshold = current.debugInfo.vadThreshold,
@@ -331,11 +361,33 @@ class SpeechCoachSessionManager(
             localTranscriber.start()
             transcriptionJob = managerScope.launch {
                 launch {
-            localTranscriber.status.collect { status ->
+                    localTranscriber.status.collect { status ->
                         _liveState.update { current ->
                             val transcript = current.transcriptDebug
+                            val heuristicWpm = if (current.smoothedWpm > 0f) {
+                                current.smoothedWpm.toDouble()
+                            } else {
+                                current.currentWpm.toDouble()
+                            }
+                            val paceSelection = selectPaceSignal(
+                                transcriptEnabled = transcript.debugEnabled,
+                                transcriptStatus = transcript.status,
+                                transcriptWpm = transcript.rollingWpm.toDouble(),
+                                transcriptFinalizedWordCount = transcript.finalizedWordCount,
+                                transcriptRollingWordCount = transcript.rollingWordCount,
+                                heuristicWpm = heuristicWpm
+                            )
                             current.copy(
-                                debugInfo = current.debugInfo.copy(transcriptionStatus = status),
+                                debugInfo = current.debugInfo.copy(
+                                    transcriptionStatus = status,
+                                    activePaceSource = paceSelection.source,
+                                    paceSourceReason = paceSelection.reason,
+                                    fallbackActive = paceSelection.fallbackActive,
+                                    transcriptReadyForDecision = paceSelection.transcriptReady,
+                                    decisionWpm = paceSelection.selectedWpm,
+                                    transcriptWpm = transcript.rollingWpm.toDouble(),
+                                    heuristicWpm = heuristicWpm
+                                ),
                                 transcriptDebug = transcript.copy(
                                     engineStatus = status,
                                     status = resolveTranscriptDebugStatus(
@@ -361,7 +413,29 @@ class SpeechCoachSessionManager(
                             partialTranscriptPresent = snapshot.partialTranscriptPresent,
                             finalizedWordCount = snapshot.finalizedWordCount
                         )
+                        val heuristicWpm = if (current.smoothedWpm > 0f) {
+                            current.smoothedWpm.toDouble()
+                        } else {
+                            current.currentWpm.toDouble()
+                        }
+                        val paceSelection = selectPaceSignal(
+                            transcriptEnabled = debugEnabled,
+                            transcriptStatus = status,
+                            transcriptWpm = snapshot.rollingWpm,
+                            transcriptFinalizedWordCount = snapshot.finalizedWordCount,
+                            transcriptRollingWordCount = snapshot.rollingWordCount,
+                            heuristicWpm = heuristicWpm
+                        )
                         current.copy(
+                            debugInfo = current.debugInfo.copy(
+                                activePaceSource = paceSelection.source,
+                                paceSourceReason = paceSelection.reason,
+                                fallbackActive = paceSelection.fallbackActive,
+                                transcriptReadyForDecision = paceSelection.transcriptReady,
+                                decisionWpm = paceSelection.selectedWpm,
+                                transcriptWpm = snapshot.rollingWpm,
+                                heuristicWpm = heuristicWpm
+                            ),
                             transcriptDebug = current.transcriptDebug.copy(
                                 status = status,
                                 transcriptText = snapshot.transcriptPreview,

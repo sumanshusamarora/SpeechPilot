@@ -135,6 +135,38 @@
 
 ---
 
+## Iteration 14 — Transcript-First Live UX + Pace Hierarchy ✅
+
+**Goal:** Make live sessions practically usable by centering transcript visibility and transcript-derived pace while keeping local-first constraints intact.
+
+- [x] Add dedicated transcript card to main live screen when transcript mode is enabled
+- [x] Keep transcript surface visible even when text is blank; render explicit states (listening, partial, final, no-final-yet, unavailable/error)
+- [x] Promote transcript-derived WPM to primary pace display when finalized words exist
+- [x] Show explicit pending/unavailable states instead of silent `0.0` transcript pace
+- [x] Demote heuristic pace to secondary/debug context in transcript mode
+- [x] Keep coaching wording honest: transcript pace may be displayed while decision engine remains heuristic
+- [x] Simplify debug panel to compact calibration fields (speech-active, transcript status/engine, text WPM, heuristic pace, target, last decision, cooldown, mic level)
+- [x] Add deterministic UI presentation tests for transcript state and primary pace selection logic
+- [x] Extend transcript status mapping tests for unavailable/error states
+- [x] Update README + architecture docs to reflect transcript-first UX and primary/secondary pace hierarchy
+
+---
+
+## Iteration 15 — Decision Signal Alignment (Transcript-Driven Feedback) ✅
+
+**Goal:** Align coaching decisions with the visible pace signal by making transcript WPM the primary decision input when ready, with explicit fallback behavior.
+
+- [x] Add explicit pace-signal selection model (`PaceSignalSource`, `PaceSignalSelection`)
+- [x] Add deterministic transcript readiness rules for decision use (finalized transcript + minimum rolling word threshold + healthy status)
+- [x] Update `SpeechCoachSessionManager` to evaluate feedback using selected signal (transcript when ready, heuristic fallback otherwise)
+- [x] Expose active decision source/reason/fallback state in live debug state
+- [x] Align live pace card and coaching labels with active decision signal
+- [x] Expand compact debug panel with pace-source diagnostics (active source, reason, fallback, readiness, decision pace, alternative pace)
+- [x] Add deterministic tests for pace-source selection and fallback behavior
+- [x] Update docs for decision-source alignment and fallback semantics
+
+---
+
 ## Iteration 11 — Live Audio Activity + UI Responsiveness ✅
 
 **Goal:** Make the app feel observably alive during a session. Add live microphone level, live VAD speech activity, and a visual level meter. Fix top-chrome button clash and system back handling.

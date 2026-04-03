@@ -3,6 +3,7 @@ package com.speechpilot.session
 import com.speechpilot.audio.AudioCapture
 import com.speechpilot.audio.AudioFrame
 import com.speechpilot.feedback.ThresholdFeedbackDecision
+import com.speechpilot.feedback.FeedbackDecision
 import com.speechpilot.pace.PaceEstimator
 import com.speechpilot.pace.PaceMetrics
 import com.speechpilot.segmentation.SpeechSegment
@@ -36,7 +37,8 @@ class SpeechCoachSessionManagerTest {
         scheduler: TestCoroutineScheduler? = null,
         segmenter: SpeechSegmenter = NoOpSegmenter(),
         paceEstimator: PaceEstimator = ConstantPaceEstimator(estimatedWpm = 120.0),
-        transcriber: LocalTranscriber = NoOpTestTranscriber()
+        transcriber: LocalTranscriber = NoOpTestTranscriber(),
+        feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision()
     ): SpeechCoachSessionManager {
         val dispatcher = if (scheduler != null) UnconfinedTestDispatcher(scheduler)
         else UnconfinedTestDispatcher()
@@ -44,6 +46,7 @@ class SpeechCoachSessionManagerTest {
             audioCapture = NoOpAudioCapture(),
             segmenter = segmenter,
             paceEstimator = paceEstimator,
+            feedbackDecision = feedbackDecision,
             localTranscriber = transcriber,
             dispatcher = dispatcher
         )
@@ -299,6 +302,7 @@ private class ConstantPaceEstimator(private val estimatedWpm: Double) : PaceEsti
 
     override fun reset() {}
 }
+
 
 private class NoOpTestTranscriber : LocalTranscriber {
     override val updates: Flow<TranscriptUpdate> = emptyFlow()

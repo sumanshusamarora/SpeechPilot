@@ -97,26 +97,29 @@ app
 ---
 
 
-### Local transcript debug mode (Phase 1 calibration)
+### Local transcript mode in live coaching
 
-SpeechPilot now includes an **optional local transcript debug mode** for calibration.
+SpeechPilot includes an **optional local transcript mode** (Settings → Local transcript debug) that is now a first-class part of the live screen when enabled.
 
 - Uses Android `SpeechRecognizer` with offline preference (`EXTRA_PREFER_OFFLINE=true`) as a best-effort signal
 - Produces incremental transcript text during active sessions
 - Computes a separate rolling **transcript-derived WPM** from finalized recognized words
-- Keeps transcript WPM separate from the existing heuristic est-WPM signal
+- Shows a dedicated transcript card in the main live session surface with explicit state:
+  - listening for speech
+  - partial transcript available
+  - final transcript available
+  - no final words yet
+  - transcription unavailable / recognizer error
+- Uses transcript-derived WPM as the primary user-facing pace metric when finalized transcript words exist
+- Keeps heuristic est-WPM visible as secondary/debug context
 - Is disabled by default and can be enabled in **Settings → Local transcript debug**
-- Always shows a transcript diagnostics block in the debug panel when enabled, including:
-  - status (`disabled`, `listening`, `waiting for speech`, `partial transcript available`, `final transcript available`, `unavailable`, `error`)
-  - partial transcript present flag
-  - finalized and rolling transcript word counts
-  - last transcript update timestamp (ms)
-  - explicit `pending final recognition` when transcript WPM is still zero due to no final words
+- Keeps a compact debug panel focused on calibration essentials: speech activity, transcript engine/status, text WPM, heuristic pace, target, and last decision reason
 
 > Notes: transcript quality/timing and true offline behavior depend on on-device speech services and installed language packs.
 > Changes to the transcript debug toggle apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
-> Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending/zero by design.
+> Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending by design, and the UI shows this explicitly.
+> Coaching decisions use transcript-derived WPM when transcript readiness is reached (finalized words + minimum rolling transcript words + healthy recognizer state). Until then, the app falls back explicitly to heuristic pace.
 
 ---
 
