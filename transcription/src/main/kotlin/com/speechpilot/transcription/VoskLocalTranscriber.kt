@@ -98,6 +98,9 @@ class VoskLocalTranscriber(
     /**
      * Returns true if the Vosk model directory and at least its `am/final.mdl` acoustic model
      * file are present on the device file system.
+     *
+     * Marked `internal` (rather than `private`) to allow direct unit-testing of model-detection
+     * logic without requiring full session lifecycle setup.
      */
     internal fun isModelAvailable(): Boolean {
         if (!modelDirectory.exists() || !modelDirectory.isDirectory) return false
@@ -148,10 +151,10 @@ class VoskLocalTranscriber(
     }
 
     private fun emitResult(jsonResult: String, stability: TranscriptStability) {
-        // TODO: Vosk API — parse JSON from Vosk result format:
-        //   {"text": "hello world"} for final results
-        //   {"partial": "hello"} for partial results
-        // For now, this method is wired but not called.
+        // TODO: Vosk API — replace the body below with actual JSON parsing before enabling.
+        // Vosk final results use {"text": "hello world"}, partials use {"partial": "hello"}.
+        // Passing raw JSON as-is will produce incorrect transcript text at runtime.
+        // This method is not yet called from runRecognition() pending full Vosk integration.
         val text = jsonResult.trim()
         if (text.isEmpty()) return
         scope.launch {

@@ -72,4 +72,19 @@ class PaceSignalSelectorTest {
         assertEquals("transcript-unavailable-fallback", selection.reason)
         assertTrue(selection.fallbackActive)
     }
+
+    @Test
+    fun `uses no signal when transcript pending and heuristic missing`() {
+        val selection = selectPaceSignal(
+            transcriptEnabled = true,
+            transcriptStatus = TranscriptDebugStatus.WaitingForSpeech,
+            transcriptWpm = 0.0,
+            transcriptFinalizedWordCount = 0,
+            transcriptRollingWordCount = 0,
+            heuristicWpm = 0.0
+        )
+
+        assertEquals(PaceSignalSource.None, selection.source)
+        assertEquals("transcript-pending-no-fallback", selection.reason)
+    }
 }
