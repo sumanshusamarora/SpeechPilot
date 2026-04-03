@@ -211,10 +211,13 @@ network transmission occurs.
 DataStore-backed user preferences. `DataStoreAppSettings` is the concrete implementation of
 `AppSettings`, reading from and writing to `DataStore<Preferences>` under the key
 `user_preferences`. Persists: `targetWpm`, `tolerancePct`, `feedbackCooldownMs`,
-`micSampleRate`. All data is local-only.
+`micSampleRate`, `transcriptionEnabled`. All data is local-only.
+
+`transcriptionEnabled` defaults to `true` — transcription is a first-class feature, on by default.
+Users can turn it off in Settings → Transcription if not needed.
 
 Settings are observed continuously by `MainViewModel`.
-For active sessions, preference changes (including transcript debug enablement) apply from the next session start to avoid disrupting the running pipeline.
+For active sessions, preference changes (including transcription enablement) apply from the next session start to avoid disrupting the running pipeline.
 
 ---
 

@@ -20,11 +20,11 @@ data class PaceMetricPresentation(
 )
 
 internal fun resolveTranscriptSurfacePresentation(state: MainUiState): TranscriptSurfacePresentation {
-    if (!state.transcriptDebugEnabled) {
+    if (!state.transcriptionEnabled) {
         return TranscriptSurfacePresentation(
             title = "Transcript",
             helperText = "Transcription unavailable",
-            bodyText = "Enable Local transcript debug in Settings to view on-device transcript text."
+            bodyText = "Enable transcription in Settings to view on-device transcript text."
         )
     }
 

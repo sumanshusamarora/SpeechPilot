@@ -263,7 +263,35 @@
   3. Implement the `TODO: Vosk API` blocks in `VoskLocalTranscriber`
 - Until model assets are present, `RoutingLocalTranscriber` automatically activates `AndroidSpeechRecognizerTranscriber` as fallback with no user action required
 
+---
 
+## Iteration 17 — Transcription as First-Class Feature ✅
+
+**Goal:** Promote transcription from a debug/experimental toggle to a first-class, on-by-default feature.
+
+**Motivation:**
+- Transcription backend architecture is now solid (Vosk-first with Android SR fallback)
+- The "Local transcript debug" naming and `false` default were holdovers from exploratory work
+- Transcription is the primary pace signal path; it should be on by default for all users
+- File sessions also need the same transcriber as live sessions
+
+**Changes:**
+- [x] Rename `UserPreferences.localTranscriptDebugEnabled` → `transcriptionEnabled`, default `false` → `true`
+- [x] Update `DataStoreAppSettings` DataStore key: `local_transcript_debug_enabled` → `transcription_enabled` (new key means existing stored `false` values are ignored — users get the new `true` default)
+- [x] Rename `SettingsViewModel.updateLocalTranscriptDebugEnabled` → `updateTranscriptionEnabled`
+- [x] Rename Settings UI: "Local transcript debug" → "Transcription" with clear user-facing description
+- [x] Rename `MainUiState.transcriptDebugEnabled` → `transcriptionEnabled`
+- [x] Wire `RoutingLocalTranscriber` for file sessions (previously file sessions used `NoOpLocalTranscriber`)
+- [x] Update `MainViewModel` all references; both live and file session managers pass the correct transcriber
+- [x] `SpeechCoachSessionManager.create()` and `createForFile()` factory defaults: `transcriptDebugEnabled=false` → `true`
+- [x] Fix `MainScreen` transcript card visibility: show only during active sessions (avoids "disabled" clutter on idle screen)
+- [x] Fix `MainScreen` debug panel visibility: removed redundant `transcriptionEnabled` condition (debug panel gates on `isListening || isSpeechDetected`)
+- [x] Update `LiveSessionPresentation.kt` field reference
+- [x] Update `LiveSessionPresentationTest.kt` field references
+- [x] Update `UserPreferencesTest`: test default is now `true`, field renamed
+- [x] Update README, `phase1_architecture.md`, `plan.md`
+
+---
 
 ## Iteration 7 — Polish and QA
 

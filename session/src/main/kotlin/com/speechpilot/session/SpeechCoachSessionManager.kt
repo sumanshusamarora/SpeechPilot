@@ -311,7 +311,7 @@ class SpeechCoachSessionManager(
             sessionRepository: SessionRepository? = null,
             feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
             localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
-            transcriptDebugEnabled: Boolean = false
+            transcriptDebugEnabled: Boolean = true
         ): SpeechCoachSessionManager = SpeechCoachSessionManager(
             feedbackDispatcher = feedbackDispatcher,
             sessionRepository = sessionRepository,
@@ -339,7 +339,7 @@ class SpeechCoachSessionManager(
             sessionRepository: SessionRepository? = null,
             feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
             localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
-            transcriptDebugEnabled: Boolean = false
+            transcriptDebugEnabled: Boolean = true
         ): SpeechCoachSessionManager = SpeechCoachSessionManager(
             audioCapture = FileAudioCapture(context, audioFileUri),
             feedbackDispatcher = feedbackDispatcher,

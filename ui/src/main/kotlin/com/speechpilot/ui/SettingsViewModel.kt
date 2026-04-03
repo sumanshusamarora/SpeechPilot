@@ -39,9 +39,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun updateLocalTranscriptDebugEnabled(enabled: Boolean) {
+    fun updateTranscriptionEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            appSettings.update(preferences.value.copy(localTranscriptDebugEnabled = enabled))
+            appSettings.update(preferences.value.copy(transcriptionEnabled = enabled))
         }
     }
 }

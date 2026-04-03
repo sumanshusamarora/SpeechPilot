@@ -173,7 +173,7 @@ private fun MainContent(
 
             item { SessionStatusCard(state = state) }
 
-            if (state.transcriptDebugEnabled) {
+            if (state.transcriptionEnabled && state.isSessionActive) {
                 item { TranscriptCard(state = state) }
             }
 
@@ -208,7 +208,7 @@ private fun MainContent(
                 }
             }
 
-            if (state.isListening || state.isSpeechDetected || state.transcriptDebugEnabled) {
+            if (state.isListening || state.isSpeechDetected) {
                 item { DebugPanel(state = state) }
             }
         }

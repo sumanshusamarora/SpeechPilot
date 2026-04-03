@@ -43,7 +43,7 @@ fun SettingsScreen(
         onTargetWpmChange = viewModel::updateTargetWpm,
         onTolerancePctChange = viewModel::updateTolerancePct,
         onFeedbackCooldownChange = viewModel::updateFeedbackCooldownMs,
-        onTranscriptDebugChange = viewModel::updateLocalTranscriptDebugEnabled,
+        onTranscriptionChange = viewModel::updateTranscriptionEnabled,
         onBack = onBack
     )
 }
@@ -54,7 +54,7 @@ private fun SettingsContent(
     onTargetWpmChange: (Int) -> Unit,
     onTolerancePctChange: (Float) -> Unit,
     onFeedbackCooldownChange: (Long) -> Unit,
-    onTranscriptDebugChange: (Boolean) -> Unit,
+    onTranscriptionChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -136,16 +136,16 @@ private fun SettingsContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Local transcript debug", style = MaterialTheme.typography.titleMedium)
+                    Text(text = "Transcription", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "On-device transcript + rolling transcript WPM for calibration.",
+                        text = "On-device speech-to-text. Provides live transcript text and text-derived WPM for accurate pace coaching.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Switch(
-                    checked = prefs.localTranscriptDebugEnabled,
-                    onCheckedChange = onTranscriptDebugChange
+                    checked = prefs.transcriptionEnabled,
+                    onCheckedChange = onTranscriptionChange
                 )
             }
         }

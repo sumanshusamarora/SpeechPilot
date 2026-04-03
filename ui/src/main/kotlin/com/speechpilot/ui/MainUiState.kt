@@ -19,8 +19,8 @@ data class MainUiState(
     val currentWpm: Float = 0f,
     /** EMA-smoothed estimated WPM. Approximate proxy — not exact WPM. */
     val smoothedWpm: Float = 0f,
-    /** Mirrors the settings toggle for local transcript debug visibility. */
-    val transcriptDebugEnabled: Boolean = false,
+    /** True when on-device transcription is enabled (user setting, default on). */
+    val transcriptionEnabled: Boolean = false,
     /** Typed runtime transcript debug diagnostics from the session pipeline. */
     val transcriptDebug: TranscriptDebugState = TranscriptDebugState(),
     val segmentCount: Int = 0,
