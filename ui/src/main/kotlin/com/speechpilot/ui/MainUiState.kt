@@ -61,6 +61,19 @@ data class MainUiState(
     val activeModelDisplayName: String = "Speech Model",
     /** Approximate download size in MB. Shown in the provisioning card before download starts. */
     val activeModelApproxSizeMb: Int = 0,
-    /** Whether the download is large enough to suggest a Wi-Fi connection. */
+    /** Whether the active backend's model download is large enough to suggest a Wi-Fi connection. */
     val activeModelWifiRecommended: Boolean = false,
+    /**
+     * True when the user has selected the Whisper.cpp backend in settings.
+     * Used to surface a warning banner when the native library is not loaded.
+     */
+    val whisperSelected: Boolean = false,
+    /**
+     * True when `libwhisper_jni.so` was successfully loaded at app startup.
+     *
+     * When `whisperSelected && !whisperNativeLibLoaded`, the Whisper backend cannot activate and
+     * will fall back to Android SpeechRecognizer. The UI surfaces this explicitly rather than
+     * silently looking like "transcript pending".
+     */
+    val whisperNativeLibLoaded: Boolean = false,
 )

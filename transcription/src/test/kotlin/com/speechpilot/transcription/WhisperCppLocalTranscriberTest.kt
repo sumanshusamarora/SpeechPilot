@@ -107,7 +107,25 @@ class WhisperCppLocalTranscriberTest {
         transcriber.start()
         advanceUntilIdle()
 
-        assertEquals(TranscriptionEngineStatus.ModelUnavailable, transcriber.status.value)
+        // After the fix this now returns NativeLibraryUnavailable rather than ModelUnavailable.
+        // Kept here as a named contrast to the NativeLibraryUnavailable assertion above.
+        assertEquals(TranscriptionEngineStatus.NativeLibraryUnavailable, transcriber.status.value)
+    }
+
+    @Test
+    fun `start reports NativeLibraryUnavailable when native library is not available`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val transcriber = makeTranscriber(
+            modelFile = modelFile,
+            runner = FakeWhisperRunner(isAvailable = false),
+            ioDispatcher = testDispatcher,
+        )
+
+        transcriber.start()
+        advanceUntilIdle()
+
+        assertEquals(TranscriptionEngineStatus.NativeLibraryUnavailable, transcriber.status.value)
     }
 
     @Test
@@ -171,6 +189,24 @@ class WhisperCppLocalTranscriberTest {
     // -------------------------------------------------------------------------------------
     // stop
     // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `stop resets status to Disabled after NativeLibraryUnavailable`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val transcriber = makeTranscriber(
+            modelFile = modelFile,
+            runner = FakeWhisperRunner(isAvailable = false),
+            ioDispatcher = testDispatcher,
+        )
+
+        transcriber.start()
+        advanceUntilIdle()
+        assertEquals(TranscriptionEngineStatus.NativeLibraryUnavailable, transcriber.status.value)
+
+        transcriber.stop()
+        assertEquals(TranscriptionEngineStatus.Disabled, transcriber.status.value)
+    }
 
     @Test
     fun `stop resets status to Disabled after ModelUnavailable`() = runTest {
@@ -242,7 +278,7 @@ class WhisperCppLocalTranscriberTest {
             transcriptSegments = listOf("hello world"),
         )
 
-        // Use a small chunk size so the test doesn't need to produce 80k samples.
+        // Use a small chunk size so the test doesn't need to produce 32k samples.
         val chunkSize = 4 // 4 samples per chunk for the test
         val transcriber = WhisperCppLocalTranscriber(
             modelFile = modelFile,
@@ -282,6 +318,15 @@ class WhisperCppLocalTranscriberTest {
     // -------------------------------------------------------------------------------------
     // Descriptor resolution — path matches KnownModels.WHISPER_GGML_SMALL
     // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `default chunk duration is 2 seconds at 16kHz`() {
+        assertEquals(
+            "Expected default chunk to be 2 s × 16,000 Hz = 32,000 samples",
+            32_000,
+            WhisperCppLocalTranscriber.CHUNK_DURATION_SAMPLES
+        )
+    }
 
     @Test
     fun `model path is consistent with KnownModels descriptor`() {

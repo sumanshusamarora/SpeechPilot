@@ -553,3 +553,92 @@ Gemma 4 E2B support in a future iteration requires only:
 - No automatic retry on transient failure — user must press Retry
 - First CMake build requires network to fetch whisper.cpp source (~100 MB)
 - Whisper inference on the `small` model is CPU-only (no GPU/Metal acceleration) — may be slow on low-end devices
+
+
+---
+
+## Phase 1 — Issue 9: Whisper Runtime Diagnostics and Activation Fix
+
+### Problem
+
+Whisper was selected as the STT backend but real-device testing produced no transcript output. The session started and mic/VAD continued, but the transcript card showed nothing, transcript-derived WPM never activated, and the heuristic fallback remained active.
+
+### Root Cause
+
+**Critical bug:** `WhisperNative.kt` called `System.loadLibrary("whisper")` but the CMakeLists.txt build target is named `whisper_jni` (producing `libwhisper_jni.so`). The native library was never loaded — `WhisperNative.isAvailable` was always `false`. The transcriber immediately reported `ModelUnavailable` (misclassifying a native-library failure), and Android SR fallback activated silently.
+
+**Secondary issues:**
+- `ModelUnavailable` was overloaded for both "model file missing" and "native library not loaded" — not distinguishable by the user or UI
+- Chunk duration of 5 seconds was too long for interactive use
+- No explicit UI warning when Whisper was selected but the runtime couldn't activate
+- `RoutingLocalTranscriber` only fell back on `ModelUnavailable`, not on the distinct new status
+- `PaceSignalSelector` and `LiveSessionPresentation` did not handle the new status
+
+### Changes
+
+- [x] **Library name fix** (`transcription/WhisperNative.kt`)
+  - `System.loadLibrary("whisper")` → `System.loadLibrary("whisper_jni")`
+  - This is the critical fix: the loaded name now matches the CMake build target `whisper_jni`
+
+- [x] **Distinct `NativeLibraryUnavailable` status** (`transcription/TranscriptionEngineStatus.kt`)
+  - New enum value `NativeLibraryUnavailable`: raised when `System.loadLibrary("whisper_jni")` fails
+  - `ModelUnavailable` is now exclusively used for "model file absent on disk"
+  - These two failure modes are now distinguishable in the UI and debug panel
+
+- [x] **Whisper transcriber** (`transcription/WhisperCppLocalTranscriber.kt`)
+  - Reports `NativeLibraryUnavailable` (not `ModelUnavailable`) when `runner.isAvailable == false`
+  - Reduced default chunk duration: `CHUNK_DURATION_SAMPLES = SAMPLE_RATE_HZ * 2` (2 seconds, was 5)
+  - Updated KDoc to reflect 2-second default and the two distinct failure statuses
+
+- [x] **Routing fallback** (`transcription/RoutingLocalTranscriber.kt`)
+  - Fallback condition now includes `NativeLibraryUnavailable || ModelUnavailable`
+
+- [x] **WPM hold duration** (`transcription/RollingTranscriptWpmCalculator.kt`)
+  - Default `chunkDurationMs` changed to 2000 ms (was 5000 ms) to match the new chunk size
+  - `wpmHoldDurationMs` defaults to 4 s (2× chunk), was 10 s
+
+- [x] **Session state** (`session/TranscriptDebugState.kt`, `session/PaceSignalSelector.kt`)
+  - Added `NativeLibraryUnavailable` to `TranscriptDebugStatus` enum
+  - `resolveTranscriptDebugStatus()` maps `NativeLibraryUnavailable` engine status → `NativeLibraryUnavailable` debug status
+  - `selectPaceSignal()` treats `NativeLibraryUnavailable` the same as `ModelUnavailable` (heuristic fallback)
+
+- [x] **UI — explicit failure messaging**
+  - `MainUiState`: added `whisperSelected: Boolean` and `whisperNativeLibLoaded: Boolean`
+  - `MainViewModel`: populates new fields from `prefs.preferWhisperBackend` and `WhisperNative.isAvailable`
+  - `MainScreen`: persistent `WhisperRuntimeWarningCard` shown when `whisperSelected && !whisperNativeLibLoaded`; debug panel adds "Whisper selected" and "Whisper native lib" rows; `transcriptStatusLabel` handles new status
+  - `LiveSessionPresentation`: `NativeLibraryUnavailable` case added to `resolveTranscriptSurfacePresentation()`
+
+- [x] **Tests**
+  - `WhisperCppLocalTranscriberTest`: `start reports NativeLibraryUnavailable when native library not available`, `stop resets status to Disabled after NativeLibraryUnavailable`, `default chunk duration is 2 seconds at 16kHz`; updated existing native-library test to assert `NativeLibraryUnavailable`
+  - `RoutingLocalTranscriberTest`: new test for fallback when primary reports `NativeLibraryUnavailable`
+  - `TranscriptDebugStateTest`: two new tests for `NativeLibraryUnavailable` status resolution
+
+- [x] **Documentation**: Updated README.md, docs/phase1_architecture.md, docs/plan.md
+
+### Runtime availability verification
+
+Whisper readiness is now determined through a clear sequence:
+
+1. **Library loads?** `WhisperNative.isAvailable` via `System.loadLibrary("whisper_jni")`
+2. **Model file present?** `WhisperCppLocalTranscriber.isModelAvailable()` checks `filesDir/whisper/ggml-small.bin`
+3. **Init succeeds?** `runner.init(modelPath)` returns a positive context handle → `Listening`
+4. **Audio reaches backend?** Shared `Flow<AudioFrame>` collected in inference loop
+5. **Chunk fires?** Buffer reaches `CHUNK_DURATION_SAMPLES = 32,000` (2 s) → inference runs
+6. **Transcript emits?** Non-empty segments → `Final` `TranscriptUpdate` emitted
+
+### Fallback behavior
+
+| Primary failure | Status reported | Fallback triggered | UI message |
+|---|---|---|---|
+| Native lib not loaded | `NativeLibraryUnavailable` | Yes — Android SR | "Whisper runtime unavailable — using Android fallback" |
+| Model file missing | `ModelUnavailable` | Yes — Android SR | "Dedicated STT model not installed" |
+| Init returned 0 | `Error` | No — stays in primary | Silent error status |
+
+When `whisperSelected && !whisperNativeLibLoaded`, a persistent error card is shown on the main screen **outside of sessions** — not just in the debug panel.
+
+### Remaining limitations
+
+- Whisper inference on the `small` model is CPU-only — may be slow on low-end devices
+- First build requires network access to fetch whisper.cpp source (~100 MB via CMake FetchContent)
+- `runner.init()` failure (`Error` status) does not trigger Android SR fallback; only `ModelUnavailable` and `NativeLibraryUnavailable` do — this is by design to avoid masking unexpected inference errors
+- Chunk-based transcription (2-second chunks) has inherent latency; it is not low-latency streaming

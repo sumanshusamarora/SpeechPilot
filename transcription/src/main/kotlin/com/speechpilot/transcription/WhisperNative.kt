@@ -12,29 +12,37 @@ package com.speechpilot.transcription
  *
  * ## Shipping the native library
  *
- * Pre-compile `whisper.cpp` with the Android NDK and place the resulting `.so` files in:
+ * The native library is compiled automatically via CMake FetchContent during
+ * `./gradlew assembleDebug`. CMakeLists.txt in `src/main/cpp/` fetches whisper.cpp v1.7.2
+ * and builds it as `libwhisper_jni.so` (the JNI bridge target is named `whisper_jni`).
+ *
+ * The resulting `.so` files are packaged by the Gradle build into:
  * ```
- * transcription/src/main/jniLibs/
- *   arm64-v8a/libwhisper.so
- *   x86_64/libwhisper.so
+ * transcription/build/.../jni/arm64-v8a/libwhisper_jni.so
+ * transcription/build/.../jni/x86_64/libwhisper_jni.so
  * ```
- * The native library is NOT bundled in this repository. Build instructions are available at:
- * https://github.com/ggerganov/whisper.cpp/blob/master/README.md
+ * No manual setup is required after the first build.
  */
 object WhisperNative {
 
     /**
-     * `true` if `libwhisper.so` was loaded successfully at startup.
+     * `true` if `libwhisper_jni.so` was loaded successfully at startup.
      *
      * When `false`, none of the [external] functions below can be called — the
-     * [WhisperCppLocalTranscriber] will report [TranscriptionEngineStatus.ModelUnavailable].
+     * [WhisperCppLocalTranscriber] will report
+     * [TranscriptionEngineStatus.NativeLibraryUnavailable].
+     *
+     * A `false` value means `System.loadLibrary("whisper_jni")` threw [UnsatisfiedLinkError],
+     * which happens when:
+     * - The native library was not bundled (e.g. unit-test builds without native compilation), or
+     * - The ABI of the device/emulator is not included in the build filters.
      */
     var isAvailable: Boolean = false
         private set
 
     init {
         isAvailable = try {
-            System.loadLibrary("whisper")
+            System.loadLibrary("whisper_jni")
             true
         } catch (_: UnsatisfiedLinkError) {
             false

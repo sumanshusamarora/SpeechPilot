@@ -122,4 +122,30 @@ class TranscriptDebugStateTest {
 
         assertEquals(TranscriptDebugStatus.Disabled, status)
     }
+
+    @Test
+    fun `NativeLibraryUnavailable status when Whisper native library is not loaded`() {
+        val status = resolveTranscriptDebugStatus(
+            debugEnabled = true,
+            engineStatus = TranscriptionEngineStatus.NativeLibraryUnavailable,
+            isSessionListening = true,
+            partialTranscriptPresent = false,
+            finalizedWordCount = 0
+        )
+
+        assertEquals(TranscriptDebugStatus.NativeLibraryUnavailable, status)
+    }
+
+    @Test
+    fun `NativeLibraryUnavailable status not triggered when debug mode off`() {
+        val status = resolveTranscriptDebugStatus(
+            debugEnabled = false,
+            engineStatus = TranscriptionEngineStatus.NativeLibraryUnavailable,
+            isSessionListening = true,
+            partialTranscriptPresent = false,
+            finalizedWordCount = 0
+        )
+
+        assertEquals(TranscriptDebugStatus.Disabled, status)
+    }
 }

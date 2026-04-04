@@ -36,6 +36,8 @@ enum class TranscriptDebugStatus {
     PartialAvailable,
     FinalAvailable,
     ModelUnavailable,
+    /** Whisper native library (`libwhisper_jni.so`) failed to load on this device. */
+    NativeLibraryUnavailable,
     Unavailable,
     Error
 }
@@ -51,6 +53,7 @@ internal fun resolveTranscriptDebugStatus(
     return when (engineStatus) {
         TranscriptionEngineStatus.Unavailable -> TranscriptDebugStatus.Unavailable
         TranscriptionEngineStatus.ModelUnavailable -> TranscriptDebugStatus.ModelUnavailable
+        TranscriptionEngineStatus.NativeLibraryUnavailable -> TranscriptDebugStatus.NativeLibraryUnavailable
         TranscriptionEngineStatus.Error -> TranscriptDebugStatus.Error
         TranscriptionEngineStatus.Disabled -> TranscriptDebugStatus.Disabled
         TranscriptionEngineStatus.InitializingModel -> TranscriptDebugStatus.Listening

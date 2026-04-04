@@ -121,10 +121,10 @@ The app uses a **two-tier backend architecture** with selectable primary STT bac
 
 Selection is performed automatically by `RoutingLocalTranscriber` at session start:
 1. Start the selected primary backend (Vosk or Whisper.cpp)
-2. If it reports `ModelUnavailable`, stop it and activate the Android SpeechRecognizer fallback
+2. If it reports `ModelUnavailable` (model file missing) or `NativeLibraryUnavailable` (native library failed to load), stop it and activate the Android SpeechRecognizer fallback
 3. Expose the active backend in `TranscriptDebugState.activeBackend`
 
-The active backend is visible in the debug panel as **Transcript backend**.
+The active backend is visible in the debug panel as **Transcript backend**. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown.
 
 #### Vosk backend (default)
 
@@ -136,14 +136,14 @@ The active backend is visible in the debug panel as **Transcript backend**.
 
 - Model: `ggml-small.bin` (~466 MB)
 - Default URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
-- Chunk-based inference: audio is buffered in 5-second windows before running inference
+- Chunk-based inference: audio is buffered in **2-second windows** before running inference
 - **Final-only updates** — no streaming partial results (inherent to Whisper's design)
 - May produce better transcript quality for accented English
 - Native runtime is compiled automatically by CMake's `FetchContent` on first build — no manual step required
 
 ##### Whisper native runtime (CMake + JNI)
 
-The native library is now **built automatically** as part of a normal `./gradlew assembleDebug` build.
+The native library is **built automatically** as part of a normal `./gradlew assembleDebug` build.
 
 How it works:
 1. The `transcription` module declares an `externalNativeBuild` pointing to `transcription/src/main/cpp/CMakeLists.txt`
@@ -153,7 +153,7 @@ How it works:
 
 On first build, CMake needs network access to clone the whisper.cpp repository (~100 MB). Subsequent builds use the CMake fetch cache and are fully offline. NDK version `26.3.11579264` is pinned for reproducibility.
 
-If the native library fails to load at runtime (unsupported device, corrupted install), `WhisperNative.isAvailable` is `false` and the backend reports `ModelUnavailable` → Android SR fallback activates automatically.
+If the native library fails to load at runtime (e.g. unsupported ABI, corrupted install), `WhisperNative.isAvailable` is `false` and the backend reports `TranscriptionEngineStatus.NativeLibraryUnavailable` → Android SR fallback activates automatically. This failure is **explicitly surfaced** in the UI as a "Whisper runtime unavailable" error card rather than silently appearing as "transcript pending".
 
 #### Automatic model provisioning (WorkManager-backed)
 
@@ -194,7 +194,7 @@ filesDir/
 - Rolling **transcript-derived WPM** from finalized recognized words (primary pace signal when available)
 - Explicit status states: listening, partial transcript, final transcript, model unavailable, error
 - Heuristic est-WPM as secondary fallback when transcript is pending or unavailable
-- **Chunk-based mode** (Whisper): WPM hold carries the last known pace for up to 10 seconds between chunks to avoid oscillation
+- **Chunk-based mode** (Whisper): WPM hold carries the last known pace for up to **4 seconds** between 2-second chunks to avoid oscillation
 
 > Transcription setting changes apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.

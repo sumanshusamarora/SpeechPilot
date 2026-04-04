@@ -101,6 +101,28 @@ class RoutingLocalTranscriberTest {
     }
 
     @Test
+    fun `falls back to Android recognizer when primary reports NativeLibraryUnavailable`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val primary = makePrimary(TranscriptionEngineStatus.NativeLibraryUnavailable)
+        val fallback = makeFallback(TranscriptionEngineStatus.Listening)
+
+        val router = RoutingLocalTranscriber(
+            primaryTranscriber = primary,
+            fallbackTranscriber = fallback,
+            fallbackDelayMs = 100,
+            dispatcher = testDispatcher
+        )
+
+        router.start()
+        advanceTimeBy(500)
+
+        assertEquals(TranscriptionBackend.AndroidSpeechRecognizer, router.activeBackend.value)
+        assertEquals(true, primary.started)
+        assertEquals(true, primary.stopped)
+        assertEquals(true, fallback.started)
+    }
+
+    @Test
     fun `active backend is None before start`() {
         val router = RoutingLocalTranscriber(
             primaryTranscriber = makePrimary(),

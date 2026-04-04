@@ -175,6 +175,13 @@ private fun MainContent(
                 }
             }
 
+            // Show a persistent warning when Whisper is selected but the native library
+            // failed to load. This surfaces the real failure reason instead of silently
+            // falling back to Android SpeechRecognizer.
+            if (state.whisperSelected && !state.whisperNativeLibLoaded) {
+                item { WhisperRuntimeWarningCard() }
+            }
+
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -490,6 +497,8 @@ private fun DebugPanel(state: MainUiState) {
                 "Mic level" to "%.2f".format(state.micLevel),
                 "Transcript backend" to state.transcriptDebug.activeBackend.name.lowercase().replace('_', '-'),
                 "Transcript engine" to state.transcriptDebug.engineStatus.name.lowercase(),
+                "Whisper selected" to if (state.whisperSelected) "yes" else "no",
+                "Whisper native lib" to if (state.whisperNativeLibLoaded) "loaded" else "not loaded",
                 "Transcript status" to transcriptStatusLabel(state.transcriptDebug.status),
                 "Text WPM" to if (state.transcriptDebug.wpmPendingFinalRecognition) {
                     "pending final recognition"
@@ -530,6 +539,7 @@ private fun transcriptStatusLabel(status: TranscriptDebugStatus): String = when 
     TranscriptDebugStatus.PartialAvailable -> "partial transcript available"
     TranscriptDebugStatus.FinalAvailable -> "final transcript available"
     TranscriptDebugStatus.ModelUnavailable -> "model unavailable — using fallback"
+    TranscriptDebugStatus.NativeLibraryUnavailable -> "native library not loaded — using fallback"
     TranscriptDebugStatus.Unavailable -> "unavailable"
     TranscriptDebugStatus.Error -> "error"
 }
@@ -547,6 +557,42 @@ private fun DebugRow(label: String, value: String) {
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(text = value, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun WhisperRuntimeWarningCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Whisper runtime unavailable",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "libwhisper_jni.so could not be loaded on this device. " +
+                    "Whisper.cpp inference will not run. " +
+                    "Android SpeechRecognizer is active as fallback.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                text = "To fix: build the app with NDK native compilation enabled " +
+                    "(./gradlew assembleDebug). Network access is required on first build.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
     }
 }
 

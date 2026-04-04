@@ -20,9 +20,10 @@ import kotlinx.coroutines.launch
  * Routes between the preferred dedicated STT backend and the Android SpeechRecognizer fallback.
  *
  * Selection strategy (evaluated on [start]):
- * 1. Try the [primaryTranscriber] (Vosk-based on-device STT).
- * 2. If it reports [TranscriptionEngineStatus.ModelUnavailable], fall back to [fallbackTranscriber]
- *    (Android SpeechRecognizer).
+ * 1. Try the [primaryTranscriber] (Vosk-based or Whisper.cpp on-device STT).
+ * 2. If it reports [TranscriptionEngineStatus.ModelUnavailable] (model file missing) or
+ *    [TranscriptionEngineStatus.NativeLibraryUnavailable] (native library not loaded),
+ *    fall back to [fallbackTranscriber] (Android SpeechRecognizer).
  * 3. Expose [activeBackend] so the rest of the app can observe which path is running.
  *
  * Both backends share the same [LocalTranscriber] contract. The selected backend's [updates] and
@@ -73,7 +74,8 @@ class RoutingLocalTranscriber(
             kotlinx.coroutines.delay(fallbackDelayMs)
 
             val selectedTranscriber = if (
-                primaryTranscriber.status.value == TranscriptionEngineStatus.ModelUnavailable
+                primaryTranscriber.status.value == TranscriptionEngineStatus.ModelUnavailable ||
+                primaryTranscriber.status.value == TranscriptionEngineStatus.NativeLibraryUnavailable
             ) {
                 // Primary unavailable — stop it and switch to fallback.
                 primaryTranscriber.stop()
