@@ -27,6 +27,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -114,25 +116,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Observes the install state of whichever model is required by the active backend and
      * mirrors it into [MainUiState.activeModelInstallState].
      *
-     * When the user switches backends, this observer restarts automatically on the next
-     * preference update → [recreateSessionManager] → [observeActiveModelState] call chain.
+     * Uses `flatMapLatest` so the inner model-state observation is automatically cancelled and
+     * restarted whenever preferences change (e.g. when the user switches from Vosk to Whisper).
+     * This prevents inner collectors from accumulating unbounded when preferences emit repeatedly.
      */
     private fun observeActiveModelState() {
         viewModelScope.launch {
-            // Collect preferences to know which model to observe.
-            appSettings.preferences.collect { prefs ->
-                val descriptor = activeModelDescriptor(prefs)
-                modelManager.stateOf(descriptor.id).collect { installState ->
+            appSettings.preferences
+                .map { prefs -> activeModelDescriptor(prefs) }
+                .flatMapLatest { descriptor ->
+                    modelManager.stateOf(descriptor.id).map { installState ->
+                        Triple(installState, descriptor.displayName,
+                            Pair(descriptor.approxSizeMb, descriptor.wifiRecommended))
+                    }
+                }
+                .collect { (installState, displayName, sizePair) ->
                     _uiState.update {
                         it.copy(
                             activeModelInstallState = installState,
-                            activeModelDisplayName = descriptor.displayName,
-                            activeModelApproxSizeMb = descriptor.approxSizeMb,
-                            activeModelWifiRecommended = descriptor.wifiRecommended,
+                            activeModelDisplayName = displayName,
+                            activeModelApproxSizeMb = sizePair.first,
+                            activeModelWifiRecommended = sizePair.second,
                         )
                     }
                 }
-            }
         }
     }
 

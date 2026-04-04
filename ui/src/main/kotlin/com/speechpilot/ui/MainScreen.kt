@@ -593,7 +593,7 @@ private fun ModelProvisioningCard(
                 is ModelInstallState.NotInstalled, ModelInstallState.Queued -> {
                     if (approxSizeMb > 0) {
                         val sizeLabel = if (approxSizeMb >= 1000) {
-                            "~${approxSizeMb / 1024.0f}".take(4) + " GB"
+                            "~${approxSizeMb / 1024} GB"
                         } else {
                             "~$approxSizeMb MB"
                         }
