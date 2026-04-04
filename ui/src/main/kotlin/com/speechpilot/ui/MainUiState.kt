@@ -46,15 +46,21 @@ data class MainUiState(
      */
     val fileSessionUri: String? = null,
     /**
-     * Current install state of the Vosk speech model. Exposed when transcription is enabled so
-     * the UI can show download/install progress or prompt the user to retry on failure.
-     * Null when transcription is disabled.
+     * Install state of the model required for the currently active STT backend.
+     *
+     * - When Vosk is selected: reflects the Vosk model install state.
+     * - When Whisper is selected: reflects the Whisper model install state.
+     * - Null when transcription is disabled.
+     *
+     * The UI shows download/install progress and a retry button based on this state.
+     * Only the active backend's model is provisioned and observed — the inactive backend's
+     * model is not downloaded eagerly.
      */
-    val voskModelInstallState: ModelInstallState? = null,
-    /**
-     * Current install state of the Whisper ggml-small model. Exposed when Whisper is the
-     * selected backend and transcription is enabled.
-     * Null when Whisper backend is not selected or transcription is disabled.
-     */
-    val whisperModelInstallState: ModelInstallState? = null,
+    val activeModelInstallState: ModelInstallState? = null,
+    /** Display name of the active backend's required model (e.g. "Vosk small (en-US)"). */
+    val activeModelDisplayName: String = "Speech Model",
+    /** Approximate download size in MB. Shown in the provisioning card before download starts. */
+    val activeModelApproxSizeMb: Int = 0,
+    /** Whether the download is large enough to suggest a Wi-Fi connection. */
+    val activeModelWifiRecommended: Boolean = false,
 )

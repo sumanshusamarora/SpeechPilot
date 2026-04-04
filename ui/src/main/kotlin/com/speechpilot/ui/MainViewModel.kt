@@ -8,9 +8,10 @@ import com.speechpilot.data.RoomSessionRepository
 import com.speechpilot.data.SpeechPilotDatabase
 import com.speechpilot.feedback.ThresholdFeedbackDecision
 import com.speechpilot.feedback.VibrationFeedbackDispatcher
-import com.speechpilot.modelmanager.DefaultLocalModelManager
 import com.speechpilot.modelmanager.KnownModels
+import com.speechpilot.modelmanager.LocalModelDescriptor
 import com.speechpilot.modelmanager.ModelInstallState
+import com.speechpilot.modelmanager.WorkManagerLocalModelManager
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.SessionState
 import com.speechpilot.session.SpeechCoachSessionManager
@@ -36,10 +37,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SpeechPilotDatabase.getInstance(getApplication()).sessionDao()
     )
 
-    private val modelManager = DefaultLocalModelManager(
-        filesDir = getApplication<Application>().filesDir,
-        scope = viewModelScope,
-    )
+    /**
+     * WorkManager-backed model manager.
+     *
+     * Uses WorkManager so large downloads (e.g. 466 MB Whisper model) survive app backgrounding.
+     * [WorkManagerLocalModelManager.startObserving] is called in [init] to wire WorkInfo updates
+     * into the [StateFlow] that the UI observes.
+     */
+    private val modelManager = WorkManagerLocalModelManager(getApplication())
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -47,79 +52,100 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var latestPreferences = UserPreferences()
     private var sessionManager: SpeechCoachSessionManager? = null
     private var liveStateJob: Job? = null
-    private var modelStateJob: Job? = null
+    private var modelObserveJob: Job? = null
 
     init {
-        observeModelState()
+        // Start translating WorkInfo updates into StateFlow<ModelInstallState>.
+        modelObserveJob = modelManager.startObserving(viewModelScope)
+
         viewModelScope.launch {
             appSettings.preferences.collect { prefs ->
                 latestPreferences = prefs
                 _uiState.update { it.copy(transcriptionEnabled = prefs.transcriptionEnabled) }
+
+                // Provision only the model required for the currently selected backend.
                 if (prefs.transcriptionEnabled) {
-                    if (prefs.preferWhisperBackend) {
-                        triggerWhisperModelProvisioning()
-                    } else {
-                        triggerVoskProvisioning()
-                    }
+                    triggerActiveBackendModelProvisioning(prefs)
                 }
-                val isSessionActive = sessionManager?.liveState?.value?.sessionState == SessionState.Active
+
+                val isSessionActive =
+                    sessionManager?.liveState?.value?.sessionState == SessionState.Active
                 if (!isSessionActive) {
                     recreateSessionManager(prefs)
                 }
             }
         }
+
+        // Observe only the active backend's model install state.
+        observeActiveModelState()
     }
 
-    /** Starts observing model install states and mirrors them into [uiState]. */
-    private fun observeModelState() {
-        modelStateJob = viewModelScope.launch {
-            launch {
-                modelManager.stateOf(KnownModels.VOSK_SMALL_EN_US.id).collect { installState ->
-                    _uiState.update { it.copy(voskModelInstallState = installState) }
-                }
-            }
-            launch {
-                modelManager.stateOf(KnownModels.WHISPER_GGML_SMALL.id).collect { installState ->
-                    _uiState.update { it.copy(whisperModelInstallState = installState) }
-                }
-            }
+    // -------------------------------------------------------------------------
+    // Model provisioning — active-backend-only
+    // -------------------------------------------------------------------------
+
+    /**
+     * Triggers provisioning of the model required for the active backend.
+     *
+     * Only one model is provisioned at a time:
+     * - Vosk selected → provision Vosk model
+     * - Whisper selected → provision Whisper model
+     * - Transcription disabled → no provisioning
+     *
+     * The [WorkManagerLocalModelManager] deduplicates concurrent calls, so this is safe to
+     * invoke on every preference update.
+     */
+    private fun triggerActiveBackendModelProvisioning(prefs: UserPreferences) {
+        viewModelScope.launch {
+            val modelId = activeModelDescriptor(prefs).id
+            modelManager.ensureInstalled(modelId)
         }
     }
 
     /**
-     * Requests provisioning of the Vosk model if it is not yet [ModelInstallState.Ready].
-     * The [modelManager] deduplicates concurrent requests, so this is safe to call on every
-     * preference update.
+     * Returns the [LocalModelDescriptor] for the backend selected in [prefs].
+     * Used both for provisioning and for surfacing model metadata in the UI.
      */
-    private fun triggerVoskProvisioning() {
-        viewModelScope.launch {
-            modelManager.ensureInstalled(KnownModels.VOSK_SMALL_EN_US.id)
-        }
-    }
+    private fun activeModelDescriptor(prefs: UserPreferences): LocalModelDescriptor =
+        if (prefs.preferWhisperBackend) KnownModels.WHISPER_GGML_SMALL
+        else KnownModels.VOSK_SMALL_EN_US
 
     /**
-     * Requests provisioning of the Whisper ggml-small model if it is not yet [ModelInstallState.Ready].
-     * The [modelManager] deduplicates concurrent requests.
+     * Observes the install state of whichever model is required by the active backend and
+     * mirrors it into [MainUiState.activeModelInstallState].
+     *
+     * When the user switches backends, this observer restarts automatically on the next
+     * preference update → [recreateSessionManager] → [observeActiveModelState] call chain.
      */
-    private fun triggerWhisperModelProvisioning() {
+    private fun observeActiveModelState() {
         viewModelScope.launch {
-            modelManager.ensureInstalled(KnownModels.WHISPER_GGML_SMALL.id)
+            // Collect preferences to know which model to observe.
+            appSettings.preferences.collect { prefs ->
+                val descriptor = activeModelDescriptor(prefs)
+                modelManager.stateOf(descriptor.id).collect { installState ->
+                    _uiState.update {
+                        it.copy(
+                            activeModelInstallState = installState,
+                            activeModelDisplayName = descriptor.displayName,
+                            activeModelApproxSizeMb = descriptor.approxSizeMb,
+                            activeModelWifiRecommended = descriptor.wifiRecommended,
+                        )
+                    }
+                }
+            }
         }
     }
 
-    /** Retries a failed Vosk model download. Called from the UI retry action. */
-    fun retryVoskModelInstall() {
+    /** Retries a failed model download for the currently active backend. */
+    fun retryActiveModelInstall() {
         viewModelScope.launch {
-            modelManager.retry(KnownModels.VOSK_SMALL_EN_US.id)
+            modelManager.retry(activeModelDescriptor(latestPreferences).id)
         }
     }
 
-    /** Retries a failed Whisper model download. Called from the UI retry action. */
-    fun retryWhisperModelInstall() {
-        viewModelScope.launch {
-            modelManager.retry(KnownModels.WHISPER_GGML_SMALL.id)
-        }
-    }
+    // -------------------------------------------------------------------------
+    // Session lifecycle
+    // -------------------------------------------------------------------------
 
     private fun recreateSessionManager(prefs: UserPreferences) {
         liveStateJob?.cancel()
@@ -250,6 +276,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
+
     fun onPermissionResult(granted: Boolean) {
         _uiState.update { current ->
             current.copy(
@@ -302,7 +332,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         liveStateJob?.cancel()
-        modelStateJob?.cancel()
+        modelObserveJob?.cancel()
         sessionManager?.release()
     }
 }

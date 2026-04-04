@@ -86,7 +86,7 @@ fun MainScreen(
         onAnalyzeFile = { fileLauncher.launch(arrayOf("audio/*")) },
         onOpenSettings = onOpenSettings,
         onOpenHistory = onOpenHistory,
-        onRetryModelInstall = viewModel::retryVoskModelInstall,
+        onRetryModelInstall = viewModel::retryActiveModelInstall,
     )
 }
 
@@ -162,12 +162,15 @@ private fun MainContent(
             item { BrandHeader() }
 
             // Show model provisioning status when transcription is enabled and model is not Ready.
-            val modelState = state.voskModelInstallState
+            val modelState = state.activeModelInstallState
             if (state.transcriptionEnabled && modelState != null && modelState !is ModelInstallState.Ready) {
                 item {
                     ModelProvisioningCard(
                         installState = modelState,
                         onRetry = onRetryModelInstall,
+                        modelDisplayName = state.activeModelDisplayName,
+                        approxSizeMb = state.activeModelApproxSizeMb,
+                        wifiRecommended = state.activeModelWifiRecommended,
                     )
                 }
             }
@@ -552,6 +555,9 @@ private fun ModelProvisioningCard(
     installState: ModelInstallState,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    modelDisplayName: String = "Speech Model",
+    approxSizeMb: Int = 0,
+    wifiRecommended: Boolean = false,
 ) {
     val isFailed = installState is ModelInstallState.Failed
     val cardColor = if (isFailed) {
@@ -577,7 +583,7 @@ private fun ModelProvisioningCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Speech Model",
+                text = modelDisplayName,
                 style = MaterialTheme.typography.labelLarge,
                 color = contentColor,
                 fontWeight = FontWeight.SemiBold,
@@ -585,8 +591,21 @@ private fun ModelProvisioningCard(
 
             when (installState) {
                 is ModelInstallState.NotInstalled, ModelInstallState.Queued -> {
+                    if (approxSizeMb > 0) {
+                        val sizeLabel = if (approxSizeMb >= 1000) {
+                            "~${approxSizeMb / 1024.0f}".take(4) + " GB"
+                        } else {
+                            "~$approxSizeMb MB"
+                        }
+                        val wifiNote = if (wifiRecommended) " · Wi-Fi recommended" else ""
+                        Text(
+                            text = "Download size: $sizeLabel$wifiNote",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = contentColor,
+                        )
+                    }
                     Text(
-                        text = "Preparing speech model download…",
+                        text = "Preparing model download…",
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor,
                     )
@@ -621,7 +640,7 @@ private fun ModelProvisioningCard(
 
                 ModelInstallState.Unpacking -> {
                     Text(
-                        text = "Installing speech model…",
+                        text = "Installing model…",
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor,
                     )
@@ -630,7 +649,7 @@ private fun ModelProvisioningCard(
 
                 ModelInstallState.Verifying -> {
                     Text(
-                        text = "Verifying speech model…",
+                        text = "Verifying model…",
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor,
                     )
@@ -639,7 +658,7 @@ private fun ModelProvisioningCard(
 
                 is ModelInstallState.Failed -> {
                     Text(
-                        text = "Speech model setup failed: ${installState.reason}",
+                        text = "Model setup failed: ${installState.reason}",
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor,
                     )
