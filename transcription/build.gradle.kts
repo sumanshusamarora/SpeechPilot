@@ -35,7 +35,7 @@ android {
     // by CMake's FetchContent on first build — no manual setup required.
     externalNativeBuild {
         cmake {
-            path = "src/main/cpp/CMakeLists.txt"
+            path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
