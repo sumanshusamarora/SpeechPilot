@@ -180,11 +180,20 @@ The transcription module uses a **two-tier backend strategy**:
 | `Unavailable` | Device/service does not provide recognition |
 | `Error` | Recognition error |
 
-#### Current runtime limitations
+#### Runtime behaviour and constraints
 
-- `VoskLocalTranscriber` is architecturally complete and checks model availability, but the actual Vosk recognition loop requires: (a) the Vosk Android AAR library added to `transcription/build.gradle.kts`, and (b) model assets placed in `context.filesDir/vosk-model-small-en-us`.
-- Until model assets are present, `VoskLocalTranscriber` reports `ModelUnavailable` immediately after `start()` and `RoutingLocalTranscriber` activates `AndroidSpeechRecognizerTranscriber` automatically.
-- `AndroidSpeechRecognizerTranscriber` behavior (quality, offline availability, latency) varies by device and speech service provider.
+- `VoskLocalTranscriber` is the fully implemented primary backend. It uses the shared app audio
+  frame stream (from `MicrophoneCapture` via `setAudioSource`) — it does **not** open a second
+  `AudioRecord`. Vosk's `Model` and `Recognizer` are initialized on the IO dispatcher and
+  released in the `finally` block on every exit path (stop, error, cancellation).
+- The Vosk AAR (`com.alphacephei:vosk-android:0.3.47`) and JNA companion
+  (`net.java.dev.jna:jna:5.13.0`) are wired in `transcription/build.gradle.kts`.
+- Until model assets are present, `VoskLocalTranscriber` reports `ModelUnavailable` immediately
+  after `start()` and `RoutingLocalTranscriber` activates `AndroidSpeechRecognizerTranscriber`.
+- `AndroidSpeechRecognizerTranscriber` behavior (quality, offline availability, latency) varies
+  by device and speech service provider — this is the fundamental reason Vosk is preferred.
+- Vosk result JSON is parsed with a lightweight regex: final results read `"text"`, partial
+  results read `"partial"`. Raw JSON is never passed through as transcript text.
 
 #### Other transcript components
 
