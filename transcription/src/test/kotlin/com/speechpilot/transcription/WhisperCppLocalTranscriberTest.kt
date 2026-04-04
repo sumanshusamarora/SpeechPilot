@@ -1,6 +1,7 @@
 package com.speechpilot.transcription
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
@@ -58,6 +59,11 @@ class WhisperCppLocalTranscriberTest {
         val transcriber = makeTranscriber()
 
         assertEquals(TranscriptionEngineStatus.Disabled, transcriber.status.value)
+    }
+
+    @Test
+    fun `WhisperNative loads the packaged whisper_jni bridge name`() {
+        assertEquals("whisper_jni", WhisperNative.LIBRARY_NAME)
     }
 
     @Test
@@ -292,11 +298,12 @@ class WhisperCppLocalTranscriberTest {
         transcriber.setAudioSource(audioSource)
 
         val collectedUpdates = mutableListOf<TranscriptUpdate>()
-        val collectJob = kotlinx.coroutines.launch {
+        val collectJob = launch {
             transcriber.updates.collect { collectedUpdates.add(it) }
         }
 
         transcriber.start()
+        advanceUntilIdle()
 
         // Emit two frames of 2 samples each — total = chunkSize, should trigger inference.
         audioSource.emit(com.speechpilot.audio.AudioFrame(samples = shortArrayOf(100, 200), sampleRate = 16000, capturedAtMs = 0L))
@@ -329,11 +336,9 @@ class WhisperCppLocalTranscriberTest {
     }
 
     @Test
-    fun `model path is consistent with KnownModels descriptor`() {
+    fun `create preserves the provided model path`() {
         val filesDir = tempFolder.newFolder("filesDir")
-        val descriptor = com.speechpilot.modelmanager.KnownModels.WHISPER_GGML_SMALL
-
-        val expectedPath = File(filesDir, "${descriptor.installDirName}/${descriptor.singleFileName}")
+        val expectedPath = File(filesDir, "whisper/ggml-small.bin")
         val transcriber = WhisperCppLocalTranscriber.create(expectedPath)
 
         assertEquals(expectedPath.absolutePath, transcriber.modelFile.absolutePath)

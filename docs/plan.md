@@ -632,7 +632,7 @@ Whisper readiness is now determined through a clear sequence:
 |---|---|---|---|
 | Native lib not loaded | `NativeLibraryUnavailable` | Yes — Android SR | "Whisper runtime unavailable — using Android fallback" |
 | Model file missing | `ModelUnavailable` | Yes — Android SR | "Dedicated STT model not installed" |
-| Init returned 0 | `Error` | No — stays in primary | Silent error status |
+| Init returned 0 / primary init error | `Error` before `Listening` | Yes — Android SR | Explicit primary-init-failed fallback reason in transcript diagnostics |
 
 When `whisperSelected && !whisperNativeLibLoaded`, a persistent error card is shown on the main screen **outside of sessions** — not just in the debug panel.
 
@@ -640,5 +640,11 @@ When `whisperSelected && !whisperNativeLibLoaded`, a persistent error card is sh
 
 - Whisper inference on the `small` model is CPU-only — may be slow on low-end devices
 - First build requires network access to fetch whisper.cpp source (~100 MB via CMake FetchContent)
-- `runner.init()` failure (`Error` status) does not trigger Android SR fallback; only `ModelUnavailable` and `NativeLibraryUnavailable` do — this is by design to avoid masking unexpected inference errors
+- Whisper native runtime is packaged only for `arm64-v8a` and `x86_64`; 32-bit-only devices will surface native-runtime-unavailable diagnostics and use fallback
 - Chunk-based transcription (2-second chunks) has inherent latency; it is not low-latency streaming
+
+### Verification notes
+
+- Verified build output: `System.loadLibrary("whisper_jni")` matches the produced and packaged `libwhisper_jni.so`
+- Verified packaging: debug APK contains `libwhisper_jni.so` for `arm64-v8a` and `x86_64`
+- Added first-class backend diagnostics so selected backend, active backend, fallback reason, native-load result, audio reachability, chunk processing, and transcript update counts are visible without guessing

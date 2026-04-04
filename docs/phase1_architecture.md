@@ -154,8 +154,8 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 |---|---|
 | `VoskLocalTranscriber` | **Default primary** backend. On-device STT using Vosk. Deterministic, no cloud dependency. Requires Vosk model assets. Reports `DedicatedLocalStt`. |
 | `WhisperCppLocalTranscriber` | **Alternative primary** backend. On-device STT using Whisper.cpp JNI. Better transcript quality for accented English. Chunk-based, Final-only updates. Reports `WhisperCpp`. |
-| `AndroidSpeechRecognizerTranscriber` | **Fallback** backend. Android `SpeechRecognizer` API, offline-preferred best effort. Activated automatically when the primary backend reports `ModelUnavailable`. |
-| `RoutingLocalTranscriber` | **Router**. Tries the configured primary backend first; falls back to `AndroidSpeechRecognizerTranscriber` if it reports `ModelUnavailable`. Exposes `activeBackend`. |
+| `AndroidSpeechRecognizerTranscriber` | **Fallback** backend. Android `SpeechRecognizer` API, offline-preferred best effort. Activated automatically when the primary backend cannot initialize cleanly. |
+| `RoutingLocalTranscriber` | **Router**. Tries the configured primary backend first; if primary initialization fails, it activates `AndroidSpeechRecognizerTranscriber` and preserves the primary failure reason in diagnostics. Exposes both selected/active backend state. |
 | `NoOpLocalTranscriber` | Disabled state (transcription off). |
 
 `LocalTranscriber.activeBackend: StateFlow<TranscriptionBackend>` exposes which backend is live:
@@ -173,9 +173,9 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 **Fallback selection** is automatic (performed by `RoutingLocalTranscriber` at session start):
 
 1. Start the selected primary backend.
-2. If it reports `TranscriptionEngineStatus.ModelUnavailable`, stop it and start `AndroidSpeechRecognizerTranscriber`.
-3. Route `updates` and `status` flows from the selected backend.
-4. Update `activeBackend` to reflect the selected path.
+2. If primary initialization fails (`ModelUnavailable`, `NativeLibraryUnavailable`, `Unavailable`, or init `Error` before `Listening`), stop it and start `AndroidSpeechRecognizerTranscriber`.
+3. Route `updates`, `status`, and diagnostics from the selected active backend.
+4. Keep the original primary failure reason available even after fallback activates.
 
 #### Engine statuses
 
@@ -236,15 +236,19 @@ Whisper activation now exposes explicit first-class state rather than silently d
 |---|---|---|
 | `ModelUnavailable` | ggml model file missing from `filesDir/whisper/` | Yes |
 | `NativeLibraryUnavailable` | `System.loadLibrary("whisper_jni")` failed at startup | Yes |
+| `Error` before `Listening` | Primary init failed after model/runtime checks passed | Yes |
 
 When the selected backend is Whisper but the native library is not loaded, the UI shows a
 persistent **"Whisper runtime unavailable"** error card (not just a vague "transcript pending"
-state). The debug panel exposes **Whisper selected** and **Whisper native lib** rows directly.
+state). The debug panel now exposes the selected backend, active backend, backend fallback state/reason,
+model path/presence, native load result/error, audio-source attachment, primary audio-frame count,
+Whisper buffered samples, chunks processed, transcript update counts, last transcript source/error,
+and last successful transcript timestamp.
 
 #### Other transcript components
 
 - `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only. Supports `chunkBased` mode with WPM hold for Whisper backends (default hold = 4 s = 2 × 2-second chunk).
-- `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, pending flags, `isChunkBased`, and `lastChunkAtMs`.
+- `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, pending flags, `isChunkBased`, `lastChunkAtMs`, and a `TranscriptionDiagnostics` snapshot for backend/runtime counters and fallback reasons.
 - `WhisperRunner` interface (with `WhisperNativeRunner` production and `FakeWhisperRunner` test implementations) abstracts native JNI calls for testability.
 
 **Current behavior:** transcript-derived WPM is the **primary displayed pace metric** in transcript mode when finalized words exist, and becomes the **feedback decision signal** once transcript readiness is reached.
@@ -435,10 +439,14 @@ MicrophoneCapture ──► AudioFrame (Flow, shared via shareIn)
 - `fallbackActive` and `transcriptReadyForDecision`
 - `decisionWpm`, `transcriptWpm`, and `heuristicWpm` for side-by-side calibration
 
+Backend-fallback diagnostics live in `transcriptDebug.diagnostics`, not `debugInfo`, to keep pace-signal fallback separate from transcription-backend fallback.
+
 ### Live Audio Activity Monitoring
 
 `SpeechCoachSessionManager` runs a **frame-level monitor** in parallel with the segmenter.
-The audio frame flow is shared via `shareIn` so `AudioRecord` is only opened once.
+The audio frame flow is shared via `shareIn` so `AudioRecord` is only opened once, with a small
+startup replay buffer (`SHARED_AUDIO_REPLAY = 8`) so the first frames are not lost while the
+transcriber and monitor attach.
 
 Every `FRAME_LEVEL_UPDATE_INTERVAL` frames (~100 ms at 16 kHz / 512 samples per frame):
 - RMS is computed for the latest frame

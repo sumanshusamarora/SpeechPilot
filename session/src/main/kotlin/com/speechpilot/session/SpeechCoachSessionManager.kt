@@ -20,6 +20,7 @@ import com.speechpilot.transcription.LocalTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RollingTranscriptWpmCalculator
 import com.speechpilot.transcription.TranscriptionBackend
+import com.speechpilot.transcription.TranscriptionDiagnostics
 import com.speechpilot.transcription.TranscriptionEngineStatus
 import com.speechpilot.vad.EnergyBasedVad
 import android.content.Context
@@ -98,24 +99,25 @@ class SpeechCoachSessionManager(
                         debugEnabled = transcriptDebugEnabled,
                         status = resolveTranscriptDebugStatus(
                             debugEnabled = transcriptDebugEnabled,
-                            engineStatus = localTranscriber.status.value,
+                            engineStatus = localTranscriber.diagnostics.value.activeBackendStatus,
                             isSessionListening = true,
                             partialTranscriptPresent = false,
                             finalizedWordCount = 0
                         ),
-                        engineStatus = localTranscriber.status.value,
-                        activeBackend = localTranscriber.activeBackend.value,
+                        engineStatus = localTranscriber.diagnostics.value.activeBackendStatus,
+                        activeBackend = localTranscriber.diagnostics.value.activeBackend,
                         transcriptText = "",
                         partialTranscriptPresent = false,
                         finalizedWordCount = 0,
                         rollingWordCount = 0,
                         rollingWpm = 0f,
                         wpmPendingFinalRecognition = false,
-                        lastUpdateAtMs = null
+                        lastUpdateAtMs = null,
+                        diagnostics = localTranscriber.diagnostics.value,
                     ),
                     debugInfo = it.debugInfo.copy(
                         targetWpm = debugTarget,
-                        transcriptionStatus = localTranscriber.status.value,
+                        transcriptionStatus = localTranscriber.diagnostics.value.activeBackendStatus,
                         vadThreshold = vadThreshold,
                         activePaceSource = PaceSignalSource.None,
                         paceSourceReason = "session-started-no-signal",
@@ -131,8 +133,10 @@ class SpeechCoachSessionManager(
 
             // Share frames between the frame-level activity monitor, segmenter, and the
             // Vosk transcriber so AudioRecord is only opened once.
+            // Keep a small replay window so early startup frames are not dropped while the
+            // transcriber and frame monitor attach to the shared stream.
             val sharedFrames = audioCapture.frames()
-                .shareIn(this, SharingStarted.Eagerly, replay = 0)
+                .shareIn(this, SharingStarted.Eagerly, replay = SHARED_AUDIO_REPLAY)
 
             // Provide the shared audio stream to the transcriber before starting it.
             // Vosk reads from this stream directly; Android SpeechRecognizer ignores it.
@@ -307,6 +311,8 @@ class SpeechCoachSessionManager(
     companion object {
         /** Update mic level / speech-active state every N frames (~32 ms/frame → every ~100 ms). */
         internal const val FRAME_LEVEL_UPDATE_INTERVAL = 3
+        /** Retain a small startup buffer so shared-frame subscribers do not miss initial audio. */
+        internal const val SHARED_AUDIO_REPLAY = 8
         /** RMS ceiling used to normalise micLevel to [0, 1]. Covers typical speech levels. */
         internal const val MAX_DISPLAY_RMS = 5_000.0
 
@@ -367,8 +373,9 @@ class SpeechCoachSessionManager(
             localTranscriber.start()
             transcriptionJob = managerScope.launch {
                 launch {
-                    localTranscriber.activeBackend.collect { backend ->
+                    localTranscriber.diagnostics.collect { diagnostics ->
                         _liveState.update { current ->
+                            val backend = diagnostics.activeBackend
                             val isChunk = backend == TranscriptionBackend.WhisperCpp
                             // Reconfigure the WPM calculator when the backend changes.
                             // Reset is safe here — a backend change means a new session context anyway.
@@ -377,9 +384,14 @@ class SpeechCoachSessionManager(
                                 transcriptWpmCalculator.setChunkBased(isChunk)
                             }
                             current.copy(
+                                debugInfo = current.debugInfo.copy(
+                                    transcriptionStatus = diagnostics.activeBackendStatus,
+                                ),
                                 transcriptDebug = current.transcriptDebug.copy(
                                     activeBackend = backend,
+                                    engineStatus = diagnostics.activeBackendStatus,
                                     isChunkBased = isChunk,
+                                    diagnostics = diagnostics,
                                 )
                             )
                         }
@@ -479,7 +491,7 @@ class SpeechCoachSessionManager(
                 }
             }
         } catch (e: Exception) {
-                _liveState.update {
+            _liveState.update {
                 val transcript = it.transcriptDebug
                 it.copy(
                     debugInfo = it.debugInfo.copy(transcriptionStatus = TranscriptionEngineStatus.Unavailable),

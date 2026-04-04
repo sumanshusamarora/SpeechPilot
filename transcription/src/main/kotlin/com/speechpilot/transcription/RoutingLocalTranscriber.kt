@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Routes between the preferred dedicated STT backend and the Android SpeechRecognizer fallback.
@@ -36,6 +38,8 @@ class RoutingLocalTranscriber(
     dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : LocalTranscriber {
 
+    private val selectionMutex = Mutex()
+
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
 
     private val _updates = MutableSharedFlow<TranscriptUpdate>(
@@ -48,11 +52,28 @@ class RoutingLocalTranscriber(
     private val _status = MutableStateFlow(TranscriptionEngineStatus.Disabled)
     override val status: StateFlow<TranscriptionEngineStatus> = _status.asStateFlow()
 
+    private val _diagnostics = MutableStateFlow(
+        TranscriptionDiagnostics(
+            selectedBackend = primaryTranscriber.activeBackend.value,
+            activeBackend = TranscriptionBackend.None,
+            selectedBackendStatus = TranscriptionEngineStatus.Disabled,
+            activeBackendStatus = TranscriptionEngineStatus.Disabled,
+            fallbackBackendStatus = fallbackTranscriber.status.value,
+        )
+    )
+    override val diagnostics: StateFlow<TranscriptionDiagnostics> = _diagnostics.asStateFlow()
+
     private val _activeBackend = MutableStateFlow(TranscriptionBackend.None)
     override val activeBackend: StateFlow<TranscriptionBackend> = _activeBackend.asStateFlow()
 
     private var routingJob: Job? = null
     private var activeTranscriber: LocalTranscriber? = null
+    private var primaryDiagnostics = primaryTranscriber.diagnostics.value
+    private var fallbackDiagnostics = fallbackTranscriber.diagnostics.value
+    private var fallbackReason: TranscriptionFailure? = null
+    private var primaryReadyObserved = false
+    private var lastTranscriptSource = TranscriptionBackend.None
+    private var lastSuccessfulTranscriptAtMs: Long? = null
 
     override fun setAudioSource(frames: Flow<AudioFrame>) {
         primaryTranscriber.setAudioSource(frames)
@@ -63,42 +84,76 @@ class RoutingLocalTranscriber(
         if (routingJob?.isActive == true) return
         _status.value = TranscriptionEngineStatus.InitializingModel
         _activeBackend.value = TranscriptionBackend.None
+        primaryDiagnostics = primaryTranscriber.diagnostics.value
+        fallbackDiagnostics = fallbackTranscriber.diagnostics.value
+        fallbackReason = null
+        primaryReadyObserved = false
+        lastTranscriptSource = TranscriptionBackend.None
+        lastSuccessfulTranscriptAtMs = null
+        recomputeDiagnostics()
 
         routingJob = scope.launch {
-            // Start the primary backend and observe its initial status.
-            primaryTranscriber.start()
-
-            // Wait briefly for the primary backend to report its availability.
-            // VoskLocalTranscriber updates status synchronously in start() when model is absent,
-            // but the coroutine launched inside may not have run yet. A short delay is sufficient.
-            kotlinx.coroutines.delay(fallbackDelayMs)
-
-            val selectedTranscriber = if (
-                primaryTranscriber.status.value == TranscriptionEngineStatus.ModelUnavailable ||
-                primaryTranscriber.status.value == TranscriptionEngineStatus.NativeLibraryUnavailable
-            ) {
-                // Primary unavailable — stop it and switch to fallback.
-                primaryTranscriber.stop()
-                fallbackTranscriber.start()
-                _activeBackend.value = fallbackTranscriber.activeBackend.value
-                fallbackTranscriber
-            } else {
-                _activeBackend.value = primaryTranscriber.activeBackend.value
-                primaryTranscriber
-            }
-
-            activeTranscriber = selectedTranscriber
-
-            // Forward status and updates from the selected backend.
             launch {
-                selectedTranscriber.status.collect { engineStatus ->
-                    _status.value = engineStatus
+                primaryTranscriber.diagnostics.collect { snapshot ->
+                    primaryDiagnostics = snapshot
+                    recomputeDiagnostics()
                 }
             }
             launch {
-                selectedTranscriber.updates.collect { update ->
-                    _updates.emit(update)
+                fallbackTranscriber.diagnostics.collect { snapshot ->
+                    fallbackDiagnostics = snapshot
+                    recomputeDiagnostics()
                 }
+            }
+            launch {
+                primaryTranscriber.status.collect { engineStatus ->
+                    handlePrimaryStatus(engineStatus)
+                }
+            }
+            launch {
+                fallbackTranscriber.status.collect { engineStatus ->
+                    if (activeTranscriber === fallbackTranscriber) {
+                        _status.value = engineStatus
+                    }
+                    recomputeDiagnostics()
+                }
+            }
+            launch {
+                primaryTranscriber.updates.collect { update ->
+                    lastTranscriptSource = primaryTranscriber.activeBackend.value
+                    lastSuccessfulTranscriptAtMs = update.receivedAtMs
+                    recomputeDiagnostics()
+                    if (activeTranscriber === primaryTranscriber) {
+                        _updates.emit(update)
+                    }
+                }
+            }
+            launch {
+                fallbackTranscriber.updates.collect { update ->
+                    lastTranscriptSource = fallbackTranscriber.activeBackend.value
+                    lastSuccessfulTranscriptAtMs = update.receivedAtMs
+                    recomputeDiagnostics()
+                    if (activeTranscriber === fallbackTranscriber) {
+                        _updates.emit(update)
+                    }
+                }
+            }
+
+            try {
+                primaryTranscriber.start()
+            } catch (error: Exception) {
+                activateFallback(
+                    TranscriptionFailure(
+                        code = "primary-start-failed",
+                        message = error.message ?: "Selected transcription backend failed to start",
+                    )
+                )
+                return@launch
+            }
+
+            launch {
+                kotlinx.coroutines.delay(fallbackDelayMs)
+                selectPrimaryIfUnselected()
             }
         }
     }
@@ -106,15 +161,169 @@ class RoutingLocalTranscriber(
     override suspend fun stop() {
         routingJob?.cancelAndJoin()
         routingJob = null
-        val current = activeTranscriber
         activeTranscriber = null
-        current?.stop()
-        // Also stop the primary if it was started but not yet selected (edge case on rapid stop).
-        if (current !== primaryTranscriber) {
-            primaryTranscriber.stop()
+        fallbackReason = null
+        primaryReadyObserved = false
+        primaryTranscriber.stop()
+        if (fallbackTranscriber !== primaryTranscriber) {
+            fallbackTranscriber.stop()
         }
         _status.value = TranscriptionEngineStatus.Disabled
         _activeBackend.value = TranscriptionBackend.None
+        recomputeDiagnostics()
+    }
+
+    private suspend fun handlePrimaryStatus(engineStatus: TranscriptionEngineStatus) {
+        if (engineStatus == TranscriptionEngineStatus.Listening ||
+            engineStatus == TranscriptionEngineStatus.Restarting
+        ) {
+            primaryReadyObserved = true
+            selectPrimaryIfUnselected()
+        }
+
+        val isInitFailure = !primaryReadyObserved && when (engineStatus) {
+            TranscriptionEngineStatus.ModelUnavailable,
+            TranscriptionEngineStatus.NativeLibraryUnavailable,
+            TranscriptionEngineStatus.Unavailable,
+            TranscriptionEngineStatus.Error -> true
+            else -> false
+        }
+
+        if (isInitFailure) {
+            activateFallback(primaryFailureFor(engineStatus))
+            return
+        }
+
+        if (activeTranscriber === primaryTranscriber || activeTranscriber == null) {
+            _status.value = engineStatus
+        }
+        recomputeDiagnostics()
+    }
+
+    private suspend fun selectPrimaryIfUnselected() {
+        selectionMutex.withLock {
+            if (activeTranscriber != null) return
+            activeTranscriber = primaryTranscriber
+            _activeBackend.value = primaryTranscriber.activeBackend.value
+            _status.value = primaryTranscriber.status.value
+            recomputeDiagnostics()
+        }
+    }
+
+    private suspend fun activateFallback(reason: TranscriptionFailure) {
+        selectionMutex.withLock {
+            if (activeTranscriber === fallbackTranscriber) return
+            fallbackReason = reason
+            primaryTranscriber.stop()
+            fallbackTranscriber.start()
+            activeTranscriber = fallbackTranscriber
+            _activeBackend.value = fallbackTranscriber.activeBackend.value
+            _status.value = fallbackTranscriber.status.value
+            recomputeDiagnostics()
+        }
+    }
+
+    private fun primaryFailureFor(status: TranscriptionEngineStatus): TranscriptionFailure = when (status) {
+        TranscriptionEngineStatus.ModelUnavailable -> TranscriptionFailure(
+            code = "primary-model-unavailable",
+            message = buildString {
+                append(primaryBackendLabel())
+                append(" model file missing")
+                primaryDiagnostics.modelPath?.let {
+                    append(" at ")
+                    append(it)
+                }
+                append(" — using Android fallback")
+            },
+        )
+
+        TranscriptionEngineStatus.NativeLibraryUnavailable -> TranscriptionFailure(
+            code = "primary-native-library-unavailable",
+            message = buildString {
+                append(primaryBackendLabel())
+                append(" native library failed to load")
+                primaryDiagnostics.nativeLibraryLoadError?.let {
+                    append(": ")
+                    append(it)
+                }
+                append(" — using Android fallback")
+            },
+        )
+
+        TranscriptionEngineStatus.Unavailable -> TranscriptionFailure(
+            code = "primary-unavailable",
+            message = "${primaryBackendLabel()} is unavailable on this device — using Android fallback",
+        )
+
+        TranscriptionEngineStatus.Error -> primaryDiagnostics.lastTranscriptError?.copy(
+            message = "${primaryDiagnostics.lastTranscriptError?.message ?: "Primary backend init failed"} — using Android fallback"
+        ) ?: TranscriptionFailure(
+            code = "primary-init-error",
+            message = "${primaryBackendLabel()} init failed — using Android fallback",
+        )
+
+        else -> TranscriptionFailure(
+            code = "primary-fallback",
+            message = "${primaryBackendLabel()} could not start — using Android fallback",
+        )
+    }
+
+    private fun primaryBackendLabel(): String = when (primaryDiagnostics.selectedBackend) {
+        TranscriptionBackend.WhisperCpp -> "Whisper"
+        TranscriptionBackend.DedicatedLocalStt -> "Vosk"
+        TranscriptionBackend.AndroidSpeechRecognizer -> "Android recognizer"
+        TranscriptionBackend.None -> "Primary backend"
+    }
+
+    private fun recomputeDiagnostics() {
+        val activeBackendSnapshot = when (activeTranscriber) {
+            primaryTranscriber -> primaryDiagnostics.activeBackend
+            fallbackTranscriber -> fallbackDiagnostics.activeBackend
+            else -> TranscriptionBackend.None
+        }
+        val activeStatusSnapshot = when (activeTranscriber) {
+            primaryTranscriber -> primaryDiagnostics.selectedBackendStatus
+            fallbackTranscriber -> fallbackDiagnostics.selectedBackendStatus
+            else -> _status.value
+        }
+        val lastError = when (activeTranscriber) {
+            fallbackTranscriber -> fallbackDiagnostics.lastTranscriptError ?: fallbackReason ?: primaryDiagnostics.lastTranscriptError
+            primaryTranscriber -> primaryDiagnostics.lastTranscriptError
+            else -> fallbackReason ?: primaryDiagnostics.lastTranscriptError ?: fallbackDiagnostics.lastTranscriptError
+        }
+        _diagnostics.value = TranscriptionDiagnostics(
+            selectedBackend = primaryDiagnostics.selectedBackend,
+            activeBackend = activeBackendSnapshot,
+            selectedBackendStatus = primaryDiagnostics.selectedBackendStatus,
+            activeBackendStatus = activeStatusSnapshot,
+            fallbackBackendStatus = fallbackDiagnostics.selectedBackendStatus,
+            fallbackActive = activeTranscriber === fallbackTranscriber,
+            fallbackReason = fallbackReason,
+            modelPath = primaryDiagnostics.modelPath,
+            modelFilePresent = primaryDiagnostics.modelFilePresent,
+            nativeLibraryName = primaryDiagnostics.nativeLibraryName,
+            nativeLibraryLoaded = primaryDiagnostics.nativeLibraryLoaded,
+            nativeLibraryLoadError = primaryDiagnostics.nativeLibraryLoadError,
+            selectedBackendInitSucceeded = primaryDiagnostics.selectedBackendInitSucceeded,
+            audioSourceAttached = primaryDiagnostics.audioSourceAttached,
+            selectedBackendAudioFramesReceived = primaryDiagnostics.selectedBackendAudioFramesReceived,
+            selectedBackendBufferedSamples = primaryDiagnostics.selectedBackendBufferedSamples,
+            chunksProcessed = primaryDiagnostics.chunksProcessed,
+            selectedBackendTranscriptUpdatesEmitted = primaryDiagnostics.selectedBackendTranscriptUpdatesEmitted,
+            fallbackTranscriptUpdatesEmitted = fallbackDiagnostics.selectedBackendTranscriptUpdatesEmitted,
+            totalTranscriptUpdatesEmitted =
+                primaryDiagnostics.selectedBackendTranscriptUpdatesEmitted +
+                    fallbackDiagnostics.selectedBackendTranscriptUpdatesEmitted,
+            lastTranscriptSource = lastTranscriptSource,
+            lastTranscriptError = lastError,
+            lastSuccessfulTranscriptAtMs = mergeLatestTimestamp(
+                mergeLatestTimestamp(
+                    primaryDiagnostics.lastSuccessfulTranscriptAtMs,
+                    fallbackDiagnostics.lastSuccessfulTranscriptAtMs,
+                ),
+                lastSuccessfulTranscriptAtMs,
+            ),
+        )
     }
 
     companion object {

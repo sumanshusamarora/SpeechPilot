@@ -9,6 +9,8 @@ class NoOpLocalTranscriber : LocalTranscriber {
     override val updates: Flow<TranscriptUpdate> = emptyFlow()
     override val status: StateFlow<TranscriptionEngineStatus> =
         MutableStateFlow(TranscriptionEngineStatus.Disabled)
+    override val diagnostics: StateFlow<TranscriptionDiagnostics> =
+        MutableStateFlow(TranscriptionDiagnostics())
     override val activeBackend: StateFlow<TranscriptionBackend> =
         MutableStateFlow(TranscriptionBackend.None)
 

@@ -1,6 +1,7 @@
 package com.speechpilot.session
 
 import com.speechpilot.transcription.TranscriptionBackend
+import com.speechpilot.transcription.TranscriptionDiagnostics
 import com.speechpilot.transcription.TranscriptionEngineStatus
 
 /**
@@ -27,6 +28,7 @@ data class TranscriptDebugState(
     val lastUpdateAtMs: Long? = null,
     val isChunkBased: Boolean = false,
     val lastChunkAtMs: Long? = null,
+    val diagnostics: TranscriptionDiagnostics = TranscriptionDiagnostics(),
 )
 
 enum class TranscriptDebugStatus {

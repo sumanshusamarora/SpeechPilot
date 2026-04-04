@@ -12,6 +12,8 @@ import com.speechpilot.segmentation.VadSpeechSegmenter
 import com.speechpilot.transcription.LocalTranscriber
 import com.speechpilot.transcription.TranscriptionBackend
 import com.speechpilot.transcription.TranscriptStability
+import com.speechpilot.transcription.TranscriptionDiagnostics
+import com.speechpilot.transcription.TranscriptionFailure
 import com.speechpilot.transcription.TranscriptUpdate
 import com.speechpilot.transcription.TranscriptionEngineStatus
 import com.speechpilot.vad.EnergyBasedVad
@@ -20,9 +22,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -72,6 +76,7 @@ class SpeechCoachSessionManagerTest {
     fun `start transitions to Active`() = runTest {
         val manager = buildManager(testScheduler)
         manager.start()
+        advanceUntilIdle()
         assertEquals(SessionState.Active, manager.state.value)
         manager.release()
     }
@@ -80,7 +85,9 @@ class SpeechCoachSessionManagerTest {
     fun `stop after start returns to Idle`() = runTest {
         val manager = buildManager(testScheduler)
         manager.start()
+        advanceUntilIdle()
         manager.stop()
+        advanceUntilIdle()
         assertEquals(SessionState.Idle, manager.state.value)
         manager.release()
     }
@@ -89,6 +96,7 @@ class SpeechCoachSessionManagerTest {
     fun `start with Passive mode stores mode in liveState`() = runTest {
         val manager = buildManager(testScheduler)
         manager.start(SessionMode.Passive)
+        advanceUntilIdle()
         assertEquals(SessionMode.Passive, manager.liveState.value.mode)
         manager.release()
     }
@@ -101,6 +109,7 @@ class SpeechCoachSessionManagerTest {
             segmenter = StubSegmenter(listOf(segment))
         )
         manager.start()
+        advanceUntilIdle()
         assertEquals(1, manager.liveState.value.stats.segmentCount)
         manager.release()
     }
@@ -125,6 +134,7 @@ class SpeechCoachSessionManagerTest {
             paceEstimator = estimator
         )
         manager.start()
+        advanceUntilIdle()
         assertEquals(150.0, manager.liveState.value.stats.peakEstimatedWpm, 0.001)
         manager.release()
     }
@@ -135,7 +145,9 @@ class SpeechCoachSessionManagerTest {
         val manager = buildManager(scheduler = testScheduler, transcriber = transcriber)
 
         manager.start()
+        advanceUntilIdle()
         transcriber.emitFinal("hello world", atMs = 5_000L)
+        advanceUntilIdle()
 
         assertTrue(manager.liveState.value.transcriptDebug.transcriptText.contains("hello world"))
         assertTrue(manager.liveState.value.transcriptDebug.rollingWpm > 0f)
@@ -146,6 +158,7 @@ class SpeechCoachSessionManagerTest {
     fun `no-op transcriber keeps transcript metrics at zero`() = runTest {
         val manager = buildManager(scheduler = testScheduler, transcriber = NoOpTestTranscriber())
         manager.start()
+        advanceUntilIdle()
 
         assertEquals("", manager.liveState.value.transcriptDebug.transcriptText)
         assertEquals(0f, manager.liveState.value.transcriptDebug.rollingWpm, 0.001f)
@@ -158,11 +171,62 @@ class SpeechCoachSessionManagerTest {
         val manager = buildManager(scheduler = testScheduler, transcriber = transcriber)
 
         manager.start()
+        advanceUntilIdle()
         transcriber.emitPartial("hello there", atMs = 2_000L)
+        advanceUntilIdle()
 
         assertTrue(manager.liveState.value.transcriptDebug.partialTranscriptPresent)
         assertTrue(manager.liveState.value.transcriptDebug.wpmPendingFinalRecognition)
         assertEquals(0f, manager.liveState.value.transcriptDebug.rollingWpm, 0.001f)
+        manager.release()
+    }
+
+    @Test
+    fun `transcription diagnostics are mirrored into live state`() = runTest {
+        val transcriber = FakeTranscriber()
+        val manager = buildManager(scheduler = testScheduler, transcriber = transcriber)
+
+        manager.start()
+        advanceUntilIdle()
+        transcriber.updateDiagnostics(
+            TranscriptionDiagnostics(
+                selectedBackend = TranscriptionBackend.WhisperCpp,
+                activeBackend = TranscriptionBackend.AndroidSpeechRecognizer,
+                selectedBackendStatus = TranscriptionEngineStatus.NativeLibraryUnavailable,
+                activeBackendStatus = TranscriptionEngineStatus.Listening,
+                fallbackActive = true,
+                fallbackReason = TranscriptionFailure(
+                    code = "primary-native-library-unavailable",
+                    message = "Whisper native library failed to load — using Android fallback",
+                ),
+                modelPath = "/tmp/whisper/ggml-small.bin",
+                modelFilePresent = true,
+                nativeLibraryName = "whisper_jni",
+                nativeLibraryLoaded = false,
+                nativeLibraryLoadError = "dlopen failed",
+                selectedBackendInitSucceeded = false,
+                audioSourceAttached = true,
+                selectedBackendAudioFramesReceived = 12,
+                selectedBackendBufferedSamples = 16000,
+                chunksProcessed = 1,
+                fallbackTranscriptUpdatesEmitted = 2,
+                totalTranscriptUpdatesEmitted = 2,
+                lastTranscriptSource = TranscriptionBackend.AndroidSpeechRecognizer,
+                lastTranscriptError = TranscriptionFailure(
+                    code = "primary-native-library-unavailable",
+                    message = "Whisper native library failed to load — using Android fallback",
+                ),
+                lastSuccessfulTranscriptAtMs = 1_000L,
+            )
+        )
+        advanceUntilIdle()
+
+        val diagnostics = manager.liveState.value.transcriptDebug.diagnostics
+        assertEquals(TranscriptionBackend.WhisperCpp, diagnostics.selectedBackend)
+        assertEquals(TranscriptionBackend.AndroidSpeechRecognizer, diagnostics.activeBackend)
+        assertTrue(diagnostics.fallbackActive)
+        assertEquals("primary-native-library-unavailable", diagnostics.fallbackReason?.code)
+        assertEquals(12, diagnostics.selectedBackendAudioFramesReceived)
         manager.release()
     }
 
@@ -181,6 +245,7 @@ class SpeechCoachSessionManagerTest {
             dispatcher = UnconfinedTestDispatcher(testScheduler)
         )
         manager.start()
+        advanceUntilIdle()
 
         assertTrue("micLevel should be > 0 after high-energy frames",
             manager.liveState.value.micLevel > 0f)
@@ -193,6 +258,7 @@ class SpeechCoachSessionManagerTest {
     fun `mic level stays zero and speech inactive when no audio frames emitted`() = runTest {
         val manager = buildManager(testScheduler)
         manager.start()
+        advanceUntilIdle()
 
         assertEquals(0f, manager.liveState.value.micLevel, 0.001f)
         assertFalse(manager.liveState.value.isSpeechActive)
@@ -212,6 +278,7 @@ class SpeechCoachSessionManagerTest {
             dispatcher = UnconfinedTestDispatcher(testScheduler)
         )
         manager.start()
+        advanceUntilIdle()
 
         assertFalse("isSpeechActive must be false for low-energy (silent) frames",
             manager.liveState.value.isSpeechActive)
@@ -226,6 +293,7 @@ class SpeechCoachSessionManagerTest {
             segmenter = StubSegmenter(listOf(segment))
         )
         manager.start()
+        advanceUntilIdle()
         assertTrue(manager.liveState.value.isSpeechDetected)
         // isSpeechDetected must persist — it is the historical "speech seen" flag.
         assertTrue(manager.liveState.value.isSpeechDetected)
@@ -289,12 +357,16 @@ private class StubAudioCapture(private val frameFlow: Flow<AudioFrame>) : AudioC
 }
 
 private class StubSegmenter(private val segments: List<SpeechSegment>) : SpeechSegmenter {
-    override fun segment(frames: Flow<AudioFrame>): Flow<SpeechSegment> =
-        flowOf(*segments.toTypedArray())
+    override fun segment(frames: Flow<AudioFrame>): Flow<SpeechSegment> = flow {
+        segments.forEach { emit(it) }
+        awaitCancellation()
+    }
 }
 
 private class NoOpSegmenter : SpeechSegmenter {
-    override fun segment(frames: Flow<AudioFrame>): Flow<SpeechSegment> = emptyFlow()
+    override fun segment(frames: Flow<AudioFrame>): Flow<SpeechSegment> = flow {
+        awaitCancellation()
+    }
 }
 
 private class ConstantPaceEstimator(private val estimatedWpm: Double) : PaceEstimator {
@@ -309,6 +381,8 @@ private class NoOpTestTranscriber : LocalTranscriber {
     override val updates: Flow<TranscriptUpdate> = emptyFlow()
     override val status: StateFlow<TranscriptionEngineStatus> =
         MutableStateFlow(TranscriptionEngineStatus.Disabled)
+    override val diagnostics: StateFlow<TranscriptionDiagnostics> =
+        MutableStateFlow(TranscriptionDiagnostics())
     override val activeBackend: StateFlow<TranscriptionBackend> =
         MutableStateFlow(TranscriptionBackend.None)
 
@@ -319,18 +393,38 @@ private class NoOpTestTranscriber : LocalTranscriber {
 private class FakeTranscriber : LocalTranscriber {
     private val flow = MutableSharedFlow<TranscriptUpdate>(extraBufferCapacity = 8)
     private val statusFlow = MutableStateFlow(TranscriptionEngineStatus.Disabled)
+    private val diagnosticsFlow = MutableStateFlow(
+        TranscriptionDiagnostics(
+            selectedBackend = TranscriptionBackend.AndroidSpeechRecognizer,
+            activeBackend = TranscriptionBackend.AndroidSpeechRecognizer,
+        )
+    )
 
     override val updates: Flow<TranscriptUpdate> = flow
     override val status: StateFlow<TranscriptionEngineStatus> = statusFlow
+    override val diagnostics: StateFlow<TranscriptionDiagnostics> = diagnosticsFlow
     override val activeBackend: StateFlow<TranscriptionBackend> =
         MutableStateFlow(TranscriptionBackend.AndroidSpeechRecognizer)
 
     override suspend fun start() {
         statusFlow.value = TranscriptionEngineStatus.Listening
+        diagnosticsFlow.value = diagnosticsFlow.value.copy(
+            selectedBackendStatus = TranscriptionEngineStatus.Listening,
+            activeBackendStatus = TranscriptionEngineStatus.Listening,
+            selectedBackendInitSucceeded = true,
+        )
     }
 
     override suspend fun stop() {
         statusFlow.value = TranscriptionEngineStatus.Disabled
+        diagnosticsFlow.value = diagnosticsFlow.value.copy(
+            selectedBackendStatus = TranscriptionEngineStatus.Disabled,
+            activeBackendStatus = TranscriptionEngineStatus.Disabled,
+        )
+    }
+
+    fun updateDiagnostics(diagnostics: TranscriptionDiagnostics) {
+        diagnosticsFlow.value = diagnostics
     }
 
     fun emitFinal(text: String, atMs: Long) {

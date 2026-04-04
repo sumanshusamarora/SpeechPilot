@@ -25,17 +25,36 @@ class RoutingLocalTranscriberTest {
         override val updates: Flow<TranscriptUpdate> = emptyFlow()
         val _status = MutableStateFlow(initialStatus)
         override val status: StateFlow<TranscriptionEngineStatus> = _status
+        private val _diagnostics = MutableStateFlow(
+            TranscriptionDiagnostics(
+                selectedBackend = activeBackend.value,
+                activeBackend = activeBackend.value,
+                selectedBackendStatus = initialStatus,
+                activeBackendStatus = initialStatus,
+                modelPath = "/tmp/model",
+                modelFilePresent = true,
+            )
+        )
+        override val diagnostics: StateFlow<TranscriptionDiagnostics> = _diagnostics
 
         var started = false
         var stopped = false
 
         override suspend fun start() {
             started = true
+            _diagnostics.value = _diagnostics.value.copy(
+                selectedBackendStatus = _status.value,
+                activeBackendStatus = _status.value,
+            )
         }
 
         override suspend fun stop() {
             stopped = true
             _status.value = TranscriptionEngineStatus.Disabled
+            _diagnostics.value = _diagnostics.value.copy(
+                selectedBackendStatus = TranscriptionEngineStatus.Disabled,
+                activeBackendStatus = TranscriptionEngineStatus.Disabled,
+            )
         }
     }
 
@@ -98,6 +117,31 @@ class RoutingLocalTranscriberTest {
         assertEquals(true, primary.started)
         assertEquals(true, primary.stopped)
         assertEquals(true, fallback.started)
+    }
+
+    @Test
+    fun `diagnostics preserve selected backend and explicit fallback reason`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val primary = makePrimary(TranscriptionEngineStatus.NativeLibraryUnavailable)
+        val fallback = makeFallback(TranscriptionEngineStatus.Listening)
+
+        val router = RoutingLocalTranscriber(
+            primaryTranscriber = primary,
+            fallbackTranscriber = fallback,
+            fallbackDelayMs = 100,
+            dispatcher = testDispatcher
+        )
+
+        router.start()
+        advanceTimeBy(500)
+
+        assertEquals(TranscriptionBackend.DedicatedLocalStt, router.diagnostics.value.selectedBackend)
+        assertEquals(TranscriptionBackend.AndroidSpeechRecognizer, router.diagnostics.value.activeBackend)
+        assertEquals(true, router.diagnostics.value.fallbackActive)
+        assertEquals(
+            "primary-native-library-unavailable",
+            router.diagnostics.value.fallbackReason?.code
+        )
     }
 
     @Test

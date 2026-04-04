@@ -121,10 +121,11 @@ The app uses a **two-tier backend architecture** with selectable primary STT bac
 
 Selection is performed automatically by `RoutingLocalTranscriber` at session start:
 1. Start the selected primary backend (Vosk or Whisper.cpp)
-2. If it reports `ModelUnavailable` (model file missing) or `NativeLibraryUnavailable` (native library failed to load), stop it and activate the Android SpeechRecognizer fallback
-3. Expose the active backend in `TranscriptDebugState.activeBackend`
+2. If the primary fails during initialization (`ModelUnavailable`, `NativeLibraryUnavailable`, `Unavailable`, or init `Error` before `Listening`), stop it and activate the Android SpeechRecognizer fallback
+3. Preserve the selected-backend failure reason in `TranscriptDebugState.diagnostics.fallbackReason`
+4. Expose both the selected backend and the active backend in the transcript diagnostics/debug UI
 
-The active backend is visible in the debug panel as **Transcript backend**. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown.
+The debug panel now shows, at minimum, the selected backend, active backend, backend fallback state/reason, model path/presence, Whisper native-load result, audio-source attachment, primary audio-frame count, Whisper buffered-sample count, chunks processed, transcript update counts, last transcript source/error, and last successful transcript timestamp. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown with the loader error detail.
 
 #### Vosk backend (default)
 
@@ -150,6 +151,11 @@ How it works:
 2. The `CMakeLists.txt` uses CMake's `FetchContent` to download whisper.cpp (v1.7.2) from GitHub during the first CMake configure
 3. CMake builds `libwhisper_jni.so` (the JNI bridge) and statically links `libwhisper` into it
 4. The resulting `.so` is packaged into the APK for `arm64-v8a` and `x86_64`
+
+Validated in the Android build artifact:
+- `System.loadLibrary("whisper_jni")` is the correct runtime load call
+- the debug APK packages `libwhisper_jni.so` for `arm64-v8a` and `x86_64`
+- JNI-exported `WhisperNative_*` symbols live in that same bridge library
 
 On first build, CMake needs network access to clone the whisper.cpp repository (~100 MB). Subsequent builds use the CMake fetch cache and are fully offline. NDK version `26.3.11579264` is pinned for reproducibility.
 

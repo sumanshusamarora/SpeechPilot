@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface LocalTranscriber {
     val updates: Flow<TranscriptUpdate>
     val status: StateFlow<TranscriptionEngineStatus>
+    val diagnostics: StateFlow<TranscriptionDiagnostics>
     /** Identifies which backend is currently active. Updated on [start] and [stop]. */
     val activeBackend: StateFlow<TranscriptionBackend>
 

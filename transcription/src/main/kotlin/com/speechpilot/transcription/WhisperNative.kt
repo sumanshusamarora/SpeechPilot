@@ -25,6 +25,8 @@ package com.speechpilot.transcription
  */
 object WhisperNative {
 
+    const val LIBRARY_NAME = "whisper_jni"
+
     /**
      * `true` if `libwhisper_jni.so` was loaded successfully at startup.
      *
@@ -40,11 +42,16 @@ object WhisperNative {
     var isAvailable: Boolean = false
         private set
 
+    var loadErrorMessage: String? = null
+        private set
+
     init {
         isAvailable = try {
-            System.loadLibrary("whisper_jni")
+            System.loadLibrary(LIBRARY_NAME)
+            loadErrorMessage = null
             true
-        } catch (_: UnsatisfiedLinkError) {
+        } catch (error: UnsatisfiedLinkError) {
+            loadErrorMessage = error.message ?: error.javaClass.simpleName
             false
         }
     }

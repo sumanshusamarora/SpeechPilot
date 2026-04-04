@@ -61,6 +61,8 @@ class VoskLocalTranscriber(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : LocalTranscriber {
 
+    private val backend = TranscriptionBackend.DedicatedLocalStt
+
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     private val _updates = MutableSharedFlow<TranscriptUpdate>(
@@ -73,8 +75,18 @@ class VoskLocalTranscriber(
     private val _status = MutableStateFlow(TranscriptionEngineStatus.Disabled)
     override val status: StateFlow<TranscriptionEngineStatus> = _status.asStateFlow()
 
+    private val _diagnostics = MutableStateFlow(
+        TranscriptionDiagnostics(
+            selectedBackend = backend,
+            activeBackend = backend,
+            modelPath = modelDirectory.absolutePath,
+            modelFilePresent = isModelAvailable(),
+        )
+    )
+    override val diagnostics: StateFlow<TranscriptionDiagnostics> = _diagnostics.asStateFlow()
+
     override val activeBackend: StateFlow<TranscriptionBackend> =
-        MutableStateFlow(TranscriptionBackend.DedicatedLocalStt).asStateFlow()
+        MutableStateFlow(backend).asStateFlow()
 
     @Volatile private var shouldRun = false
     @Volatile private var audioSource: Flow<AudioFrame>? = null
@@ -82,16 +94,41 @@ class VoskLocalTranscriber(
 
     override fun setAudioSource(frames: Flow<AudioFrame>) {
         audioSource = frames
+        _diagnostics.value = _diagnostics.value.copy(audioSourceAttached = true)
     }
 
     override suspend fun start() {
         if (shouldRun) return
         shouldRun = true
         _status.value = TranscriptionEngineStatus.InitializingModel
+        _diagnostics.value = _diagnostics.value.copy(
+            selectedBackendStatus = TranscriptionEngineStatus.InitializingModel,
+            activeBackendStatus = TranscriptionEngineStatus.InitializingModel,
+            modelFilePresent = isModelAvailable(),
+            selectedBackendInitSucceeded = false,
+            selectedBackendAudioFramesReceived = 0,
+            selectedBackendBufferedSamples = 0,
+            chunksProcessed = 0,
+            selectedBackendTranscriptUpdatesEmitted = 0,
+            fallbackTranscriptUpdatesEmitted = 0,
+            totalTranscriptUpdatesEmitted = 0,
+            lastTranscriptSource = TranscriptionBackend.None,
+            lastTranscriptError = null,
+            lastSuccessfulTranscriptAtMs = null,
+        )
 
         recognitionJob = scope.launch {
             if (!isModelAvailable()) {
                 _status.value = TranscriptionEngineStatus.ModelUnavailable
+                _diagnostics.value = _diagnostics.value.copy(
+                    selectedBackendStatus = TranscriptionEngineStatus.ModelUnavailable,
+                    activeBackendStatus = TranscriptionEngineStatus.ModelUnavailable,
+                    modelFilePresent = false,
+                    lastTranscriptError = TranscriptionFailure(
+                        code = "vosk-model-missing",
+                        message = "Vosk model directory missing at ${modelDirectory.absolutePath}",
+                    ),
+                )
                 return@launch
             }
             runRecognition()
@@ -103,6 +140,10 @@ class VoskLocalTranscriber(
         recognitionJob?.cancelAndJoin()
         recognitionJob = null
         _status.value = TranscriptionEngineStatus.Disabled
+        _diagnostics.value = _diagnostics.value.copy(
+            selectedBackendStatus = TranscriptionEngineStatus.Disabled,
+            activeBackendStatus = TranscriptionEngineStatus.Disabled,
+        )
     }
 
     /**
@@ -129,12 +170,23 @@ class VoskLocalTranscriber(
      */
     private suspend fun runRecognition() {
         val source = audioSource ?: run {
-            if (shouldRun) _status.value = TranscriptionEngineStatus.Error
+            if (shouldRun) {
+                _status.value = TranscriptionEngineStatus.Error
+                _diagnostics.value = _diagnostics.value.copy(
+                    selectedBackendStatus = TranscriptionEngineStatus.Error,
+                    activeBackendStatus = TranscriptionEngineStatus.Error,
+                    lastTranscriptError = TranscriptionFailure(
+                        code = "vosk-audio-source-missing",
+                        message = "Vosk audio source was not attached before start()",
+                    ),
+                )
+            }
             return
         }
         withContext(ioDispatcher) {
             var model: org.vosk.Model? = null
             var recognizer: org.vosk.Recognizer? = null
+            var framesReceived = 0L
             try {
                 val loadedModel = org.vosk.Model(modelDirectory.absolutePath)
                 model = loadedModel
@@ -143,27 +195,47 @@ class VoskLocalTranscriber(
                 rec.setWords(true)
 
                 _status.value = TranscriptionEngineStatus.Listening
+                _diagnostics.value = _diagnostics.value.copy(
+                    selectedBackendStatus = TranscriptionEngineStatus.Listening,
+                    activeBackendStatus = TranscriptionEngineStatus.Listening,
+                    selectedBackendInitSucceeded = true,
+                    lastTranscriptError = null,
+                )
 
                 source.collect { frame ->
                     ensureActive()
                     if (!shouldRun) return@collect
+                    framesReceived++
                     val bytes = frame.samples.toLeByteArray()
+                    if (framesReceived == 1L || framesReceived % DIAGNOSTIC_FRAME_UPDATE_INTERVAL == 0L) {
+                        _diagnostics.value = _diagnostics.value.copy(
+                            selectedBackendAudioFramesReceived = framesReceived,
+                        )
+                    }
                     if (rec.acceptWaveForm(bytes, bytes.size)) {
-                        emitResult(rec.result, TranscriptStability.Final)
+                        emitResult(rec.result, TranscriptStability.Final, framesReceived)
                     } else {
-                        emitResult(rec.partialResult, TranscriptStability.Partial)
+                        emitResult(rec.partialResult, TranscriptStability.Partial, framesReceived)
                     }
                 }
 
                 // Flush any buffered speech after the audio stream ends.
                 if (shouldRun) {
-                    emitResult(rec.finalResult, TranscriptStability.Final)
+                    emitResult(rec.finalResult, TranscriptStability.Final, framesReceived)
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (shouldRun) {
                     _status.value = TranscriptionEngineStatus.Error
+                    _diagnostics.value = _diagnostics.value.copy(
+                        selectedBackendStatus = TranscriptionEngineStatus.Error,
+                        activeBackendStatus = TranscriptionEngineStatus.Error,
+                        lastTranscriptError = TranscriptionFailure(
+                            code = "vosk-runtime-error",
+                            message = e.message ?: "Vosk transcription failed during runtime",
+                        ),
+                    )
                 }
             } finally {
                 recognizer?.close()
@@ -172,18 +244,30 @@ class VoskLocalTranscriber(
         }
     }
 
-    private fun emitResult(jsonResult: String, stability: TranscriptStability) {
+    private suspend fun emitResult(
+        jsonResult: String,
+        stability: TranscriptStability,
+        framesReceived: Long,
+    ) {
         val text = parseVoskResult(jsonResult, stability)
         if (text.isEmpty()) return
-        scope.launch {
-            _updates.emit(
-                TranscriptUpdate(
-                    text = text,
-                    stability = stability,
-                    receivedAtMs = clockMs()
-                )
+        val timestamp = clockMs()
+        _diagnostics.value = _diagnostics.value.copy(
+            selectedBackendAudioFramesReceived = framesReceived,
+            selectedBackendTranscriptUpdatesEmitted =
+                _diagnostics.value.selectedBackendTranscriptUpdatesEmitted + 1,
+            totalTranscriptUpdatesEmitted = _diagnostics.value.totalTranscriptUpdatesEmitted + 1,
+            lastTranscriptSource = backend,
+            lastSuccessfulTranscriptAtMs = timestamp,
+            lastTranscriptError = null,
+        )
+        _updates.emit(
+            TranscriptUpdate(
+                text = text,
+                stability = stability,
+                receivedAtMs = timestamp
             )
-        }
+        )
     }
 
     companion object {
@@ -192,6 +276,7 @@ class VoskLocalTranscriber(
 
         /** Expected audio sample rate for the Vosk recognizer. */
         const val SAMPLE_RATE_HZ = 16_000
+        private const val DIAGNOSTIC_FRAME_UPDATE_INTERVAL = 8L
 
         /** Creates a [VoskLocalTranscriber] using the default model path for the given context. */
         fun create(context: Context): VoskLocalTranscriber =

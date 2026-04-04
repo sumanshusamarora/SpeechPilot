@@ -2,6 +2,7 @@ package com.speechpilot.ui
 
 import com.speechpilot.session.TranscriptDebugStatus
 import com.speechpilot.session.PaceSignalSource
+import com.speechpilot.transcription.TranscriptionBackend
 
 data class TranscriptSurfacePresentation(
     val title: String,
@@ -29,6 +30,7 @@ internal fun resolveTranscriptSurfacePresentation(state: MainUiState): Transcrip
     }
 
     val transcript = state.transcriptDebug
+    val diagnostics = transcript.diagnostics
     return when (transcript.status) {
         TranscriptDebugStatus.Disabled -> TranscriptSurfacePresentation(
             title = "Transcript",
@@ -39,29 +41,48 @@ internal fun resolveTranscriptSurfacePresentation(state: MainUiState): Transcrip
         TranscriptDebugStatus.Unavailable -> TranscriptSurfacePresentation(
             title = "Transcript",
             helperText = "Transcription unavailable",
-            bodyText = "This device/runtime does not currently provide local recognition."
+            bodyText = diagnostics.lastTranscriptError?.message
+                ?: "This device/runtime does not currently provide local recognition."
         )
 
         TranscriptDebugStatus.ModelUnavailable -> TranscriptSurfacePresentation(
             title = "Transcript",
-            helperText = "Dedicated STT model not installed",
-            bodyText = "Vosk model assets are required for on-device transcription. " +
-                "Place model files in the app's files directory to enable the dedicated backend. " +
-                "Using Android SpeechRecognizer as fallback."
+            helperText = "${backendLabel(diagnostics.selectedBackend)} model unavailable",
+            bodyText = diagnostics.fallbackReason?.message
+                ?: buildString {
+                    append("Model file not found")
+                    diagnostics.modelPath?.let {
+                        append(" at ")
+                        append(it)
+                    }
+                    if (diagnostics.fallbackActive) {
+                        append(". Android SpeechRecognizer fallback is active.")
+                    }
+                }
         )
 
         TranscriptDebugStatus.NativeLibraryUnavailable -> TranscriptSurfacePresentation(
             title = "Transcript",
             helperText = "Whisper runtime unavailable — using Android fallback",
-            bodyText = "The Whisper native library (libwhisper_jni.so) could not be loaded on " +
-                "this device. The Android SpeechRecognizer is active as fallback. " +
-                "Ensure the app was built with NDK native compilation enabled."
+            bodyText = diagnostics.fallbackReason?.message
+                ?: buildString {
+                    append("The Whisper native library (")
+                    append(diagnostics.nativeLibraryName ?: "libwhisper_jni.so")
+                    append(") could not be loaded")
+                    diagnostics.nativeLibraryLoadError?.let {
+                        append(": ")
+                        append(it)
+                    }
+                    append(". Android SpeechRecognizer fallback is active.")
+                }
         )
 
         TranscriptDebugStatus.Error -> TranscriptSurfacePresentation(
             title = "Transcript",
             helperText = "Transcription unavailable",
-            bodyText = "Recognizer error. SpeechPilot will retry while the session is active."
+            bodyText = diagnostics.lastTranscriptError?.message
+                ?: diagnostics.fallbackReason?.message
+                ?: "Recognizer error. SpeechPilot will retry while the session is active."
         )
 
         TranscriptDebugStatus.PartialAvailable -> TranscriptSurfacePresentation(
@@ -90,6 +111,13 @@ internal fun resolveTranscriptSurfacePresentation(state: MainUiState): Transcrip
             bodyText = "No final words yet."
         )
     }
+}
+
+private fun backendLabel(backend: TranscriptionBackend): String = when (backend) {
+    TranscriptionBackend.DedicatedLocalStt -> "Vosk"
+    TranscriptionBackend.WhisperCpp -> "Whisper"
+    TranscriptionBackend.AndroidSpeechRecognizer -> "Android recognizer"
+    TranscriptionBackend.None -> "No backend"
 }
 
 internal fun resolvePaceMetricPresentation(state: MainUiState): PaceMetricPresentation {

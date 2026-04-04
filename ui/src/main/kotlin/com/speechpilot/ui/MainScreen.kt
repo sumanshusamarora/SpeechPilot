@@ -52,6 +52,7 @@ import com.speechpilot.modelmanager.ModelInstallState
 import com.speechpilot.session.PaceSignalSource
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.TranscriptDebugStatus
+import com.speechpilot.transcription.TranscriptionBackend
 
 @Composable
 fun MainScreen(
@@ -179,7 +180,7 @@ private fun MainContent(
             // failed to load. This surfaces the real failure reason instead of silently
             // falling back to Android SpeechRecognizer.
             if (state.whisperSelected && !state.whisperNativeLibLoaded) {
-                item { WhisperRuntimeWarningCard() }
+                item { WhisperRuntimeWarningCard(state.transcriptDebug.diagnostics) }
             }
 
             item {
@@ -466,6 +467,7 @@ private fun FeedbackChip(
 @Composable
 private fun DebugPanel(state: MainUiState) {
     val debug = state.debugInfo
+    val transcriptDiagnostics = state.transcriptDebug.diagnostics
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -495,10 +497,32 @@ private fun DebugPanel(state: MainUiState) {
             val rows = listOf(
                 "Speech active" to speechLabel,
                 "Mic level" to "%.2f".format(state.micLevel),
-                "Transcript backend" to state.transcriptDebug.activeBackend.name.lowercase().replace('_', '-'),
-                "Transcript engine" to state.transcriptDebug.engineStatus.name.lowercase(),
+                "Selected backend" to backendLabel(transcriptDiagnostics.selectedBackend),
+                "Active backend" to backendLabel(transcriptDiagnostics.activeBackend),
+                "Selected backend status" to transcriptDiagnostics.selectedBackendStatus.name.lowercase(),
+                "Active backend status" to transcriptDiagnostics.activeBackendStatus.name.lowercase(),
+                "Backend fallback" to if (transcriptDiagnostics.fallbackActive) "yes" else "no",
+                "Fallback reason" to (transcriptDiagnostics.fallbackReason?.message ?: "none"),
                 "Whisper selected" to if (state.whisperSelected) "yes" else "no",
-                "Whisper native lib" to if (state.whisperNativeLibLoaded) "loaded" else "not loaded",
+                "Whisper native lib" to when (transcriptDiagnostics.nativeLibraryLoaded) {
+                    true -> "loaded"
+                    false -> "not loaded"
+                    null -> "n/a"
+                },
+                "Native load error" to (transcriptDiagnostics.nativeLibraryLoadError ?: "none"),
+                "Model file present" to if (transcriptDiagnostics.modelFilePresent) "yes" else "no",
+                "Model path" to (transcriptDiagnostics.modelPath ?: "n/a"),
+                "Primary init succeeded" to if (transcriptDiagnostics.selectedBackendInitSucceeded) "yes" else "no",
+                "Audio source attached" to if (transcriptDiagnostics.audioSourceAttached) "yes" else "no",
+                "Audio reached primary" to if (transcriptDiagnostics.selectedBackendAudioFramesReceived > 0) "yes" else "no",
+                "Primary audio frames" to transcriptDiagnostics.selectedBackendAudioFramesReceived.toString(),
+                "Whisper buffer samples" to transcriptDiagnostics.selectedBackendBufferedSamples.toString(),
+                "Chunks processed" to transcriptDiagnostics.chunksProcessed.toString(),
+                "Primary transcript updates" to transcriptDiagnostics.selectedBackendTranscriptUpdatesEmitted.toString(),
+                "Fallback transcript updates" to transcriptDiagnostics.fallbackTranscriptUpdatesEmitted.toString(),
+                "Last transcript source" to backendLabel(transcriptDiagnostics.lastTranscriptSource),
+                "Last transcript error" to (transcriptDiagnostics.lastTranscriptError?.message ?: "none"),
+                "Last transcript success" to (transcriptDiagnostics.lastSuccessfulTranscriptAtMs?.toString() ?: "none"),
                 "Transcript status" to transcriptStatusLabel(state.transcriptDebug.status),
                 "Text WPM" to if (state.transcriptDebug.wpmPendingFinalRecognition) {
                     "pending final recognition"
@@ -512,7 +536,7 @@ private fun DebugPanel(state: MainUiState) {
                 },
                 "Decision signal" to debug.activePaceSource.name.lowercase(),
                 "Source reason" to debug.paceSourceReason,
-                "Fallback active" to if (debug.fallbackActive) "yes" else "no",
+                "Pace fallback" to if (debug.fallbackActive) "yes" else "no",
                 "Transcript ready" to if (debug.transcriptReadyForDecision) "yes" else "no",
                 "Decision pace" to if (debug.decisionWpm > 0.0) {
                     "%.1f WPM".format(debug.decisionWpm)
@@ -561,7 +585,7 @@ private fun DebugRow(label: String, value: String) {
 }
 
 @Composable
-private fun WhisperRuntimeWarningCard() {
+private fun WhisperRuntimeWarningCard(diagnostics: com.speechpilot.transcription.TranscriptionDiagnostics) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -580,18 +604,26 @@ private fun WhisperRuntimeWarningCard() {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "The Whisper speech engine could not start on this device. " +
+                text = diagnostics.fallbackReason?.message ?: "The Whisper speech engine could not start on this device. " +
                     "Transcription is running via Android SpeechRecognizer instead.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Text(
-                text = "Try reinstalling the app if Whisper was expected to be available.",
+                text = diagnostics.nativeLibraryLoadError?.let { "Native loader detail: $it" }
+                    ?: "Try reinstalling the app if Whisper was expected to be available.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
         }
     }
+}
+
+private fun backendLabel(backend: TranscriptionBackend): String = when (backend) {
+    TranscriptionBackend.DedicatedLocalStt -> "Vosk"
+    TranscriptionBackend.WhisperCpp -> "Whisper"
+    TranscriptionBackend.AndroidSpeechRecognizer -> "Android recognizer"
+    TranscriptionBackend.None -> "None"
 }
 
 @Composable
