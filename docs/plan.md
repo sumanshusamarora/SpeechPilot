@@ -293,6 +293,60 @@
 
 ---
 
+## Iteration 18 — Vosk Backend Fully Implemented ✅
+
+**Goal:** Finish the Vosk transcription backend so it is actually operational, not just scaffolded.
+
+**Motivation:**
+- Previous iterations introduced `VoskLocalTranscriber` with lifecycle, model detection, and
+  routing wired — but `runRecognition()` still contained TODO placeholders
+- Vosk AAR library was not added to `build.gradle.kts`
+- No audio was actually fed to Vosk (it had no access to the shared frame stream)
+- `emitResult()` passed raw JSON as-is instead of extracting transcript text
+- This meant the app always fell back to Android SpeechRecognizer despite Vosk being "preferred"
+
+**Changes:**
+- [x] Add `com.alphacephei:vosk-android:0.3.47@aar` and `net.java.dev.jna:jna:5.13.0@aar` to
+      `transcription/build.gradle.kts`
+- [x] Add `implementation(project(":audio"))` to `transcription/build.gradle.kts` so
+      `VoskLocalTranscriber` can receive `Flow<AudioFrame>` from the session pipeline
+- [x] Add `setAudioSource(Flow<AudioFrame>)` default no-op method to `LocalTranscriber` interface;
+      backends that own their own audio (Android SR) inherit the no-op; Vosk overrides it
+- [x] Implement `VoskLocalTranscriber.setAudioSource()` — stores the shared frame flow reference
+- [x] Implement `VoskLocalTranscriber.runRecognition()` — opens `org.vosk.Model` +
+      `org.vosk.Recognizer`, collects PCM frames from the audio source, feeds them to Vosk,
+      emits partial/final results; releases resources in `finally`
+- [x] Implement `VoskLocalTranscriber.stop()` using `recognitionJob.cancelAndJoin()` for clean
+      lifecycle (previously just set a flag and ran a no-op `withContext`)
+- [x] Implement `VoskLocalTranscriber.emitResult()` with real JSON parsing via `parseVoskResult()`
+- [x] Implement `VoskLocalTranscriber.parseVoskResult()` — lightweight regex extracts `"text"`
+      (final) or `"partial"` (partial) from Vosk JSON; never passes raw JSON through
+- [x] Add `ShortArray.toLeByteArray()` helper — converts 16-bit PCM samples to little-endian
+      byte pairs as required by `Recognizer.acceptWaveForm()`
+- [x] Update `RoutingLocalTranscriber.setAudioSource()` to forward to both primary and fallback
+- [x] Restructure `SpeechCoachSessionManager`: `sharedFrames` is set up **before**
+      `localTranscriber.setAudioSource(sharedFrames)` and `startTranscriptionCollector()` —
+      ensures Vosk has the audio source when `start()` is called
+- [x] Add `parseVoskResult` unit tests (final, partial, blank, missing key, whitespace, compact JSON)
+- [x] Add `setAudioSource` unit test
+- [x] Remove stale "add library / implement TODO" notes from README and `phase1_architecture.md`
+- [x] Update README Vosk section to reflect actual wired state
+- [x] Update `phase1_architecture.md` runtime limitations → runtime behaviour section
+
+**Architecture note:** Vosk reads from the existing `MicrophoneCapture` shared frame stream — it
+does **not** open a second `AudioRecord`. This avoids mic conflicts and keeps audio capture
+centralized. Android SpeechRecognizer (fallback) manages its own audio via the system service and
+is unaffected.
+
+**Remaining limitations:**
+- Vosk recognition quality in production requires model assets on the device (push via ADB — see README)
+- End-to-end recognition cannot be tested in unit tests (Vosk JNI not available on JVM); only
+  model availability detection and JSON parsing are covered by unit tests
+- Vosk `setWords(true)` enables word-level timestamps in results; these are available in the JSON
+  but are not currently consumed (only the `text` field is extracted)
+
+---
+
 ## Iteration 7 — Polish and QA
 
 **Goal:** Release-candidate quality.

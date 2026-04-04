@@ -1,10 +1,14 @@
 package com.speechpilot.transcription
 
 import android.content.Context
+import com.speechpilot.audio.AudioFrame
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -23,6 +27,12 @@ import java.io.File
  * significantly more reliable than [AndroidSpeechRecognizerTranscriber] for continuous
  * transcript-driven WPM estimation.
  *
+ * ## Audio source
+ *
+ * This backend does **not** open its own [android.media.AudioRecord]. Instead it receives the
+ * shared PCM frame stream from the session pipeline via [setAudioSource]. Call [setAudioSource]
+ * before [start]. Frames are expected to be mono 16-bit PCM at [SAMPLE_RATE_HZ].
+ *
  * ## Model availability
  *
  * Vosk requires a pre-trained acoustic model in [modelDirectory]. Until the model directory is
@@ -33,21 +43,16 @@ import java.io.File
  * The default model directory for real device use is:
  * `[Context.getFilesDir]/vosk-model-small-en-us`
  *
+ * ## Setting up the model
+ *
+ * 1. Download a model from https://alphacephei.com/vosk/models
+ *    (e.g. `vosk-model-small-en-us-0.15.zip`).
+ * 2. Unzip it so that the directory is accessible at
+ *    `<device-files-dir>/vosk-model-small-en-us/`.
+ *    Push via ADB: `adb push vosk-model-small-en-us/ /data/data/<package>/files/vosk-model-small-en-us/`
+ * 3. The directory must contain `am/final.mdl` (or a top-level `final.mdl` for flat models).
+ *
  * Use [VoskLocalTranscriber.create] for production code.
- *
- * ## Integrating the Vosk library
- *
- * To enable full recognition (once model assets are provided):
- * 1. Add the Vosk Android AAR to the version catalog and `transcription/build.gradle.kts`:
- *    ```
- *    implementation("com.alphacephei:vosk-android:0.3.47@aar")
- *    implementation("net.java.dev.jna:jna:5.13.0@aar")
- *    ```
- * 2. Place model assets in `context.filesDir/vosk-model-small-en-us` (download from
- *    https://alphacephei.com/vosk/models — e.g. `vosk-model-small-en-us-0.15.zip`).
- * 3. Replace the `TODO: Vosk API` sections in [runRecognition] with actual Vosk calls.
- *
- * The architecture, lifecycle, and error handling below are production-ready for Vosk integration.
  */
 class VoskLocalTranscriber(
     val modelDirectory: File,
@@ -70,15 +75,20 @@ class VoskLocalTranscriber(
     override val activeBackend: StateFlow<TranscriptionBackend> =
         MutableStateFlow(TranscriptionBackend.DedicatedLocalStt).asStateFlow()
 
-    @Volatile
-    private var shouldRun = false
+    @Volatile private var shouldRun = false
+    @Volatile private var audioSource: Flow<AudioFrame>? = null
+    private var recognitionJob: Job? = null
+
+    override fun setAudioSource(frames: Flow<AudioFrame>) {
+        audioSource = frames
+    }
 
     override suspend fun start() {
         if (shouldRun) return
         shouldRun = true
         _status.value = TranscriptionEngineStatus.InitializingModel
 
-        scope.launch {
+        recognitionJob = scope.launch {
             if (!isModelAvailable()) {
                 _status.value = TranscriptionEngineStatus.ModelUnavailable
                 return@launch
@@ -89,10 +99,9 @@ class VoskLocalTranscriber(
 
     override suspend fun stop() {
         shouldRun = false
-        withContext(ioDispatcher) {
-            // TODO: Vosk API — release recognizer and model resources here.
-            _status.value = TranscriptionEngineStatus.Disabled
-        }
+        recognitionJob?.cancelAndJoin()
+        recognitionJob = null
+        _status.value = TranscriptionEngineStatus.Disabled
     }
 
     /**
@@ -112,50 +121,57 @@ class VoskLocalTranscriber(
     /**
      * Recognition loop. Called only when [isModelAvailable] returns true.
      *
-     * Replace the TODO blocks with Vosk API calls when the Vosk Android library is added.
+     * Opens the Vosk [org.vosk.Model] and [org.vosk.Recognizer], then collects PCM frames from
+     * [audioSource] and feeds them to the recognizer. Partial and final results are emitted via
+     * [_updates]. Vosk resources are released in the `finally` block regardless of how the loop
+     * exits (normal completion, cancellation, or error).
      */
     private suspend fun runRecognition() {
+        val source = audioSource ?: run {
+            if (shouldRun) _status.value = TranscriptionEngineStatus.Error
+            return
+        }
         withContext(ioDispatcher) {
+            var model: org.vosk.Model? = null
+            var recognizer: org.vosk.Recognizer? = null
             try {
-                // TODO: Vosk API — initialize Model:
-                //   val model = Model(modelDirectory.absolutePath)
-                // TODO: Vosk API — initialize Recognizer:
-                //   val recognizer = Recognizer(model, SAMPLE_RATE_HZ.toFloat())
-                //   recognizer.setWords(true)
+                val loadedModel = org.vosk.Model(modelDirectory.absolutePath)
+                model = loadedModel
+                val rec = org.vosk.Recognizer(loadedModel, SAMPLE_RATE_HZ.toFloat())
+                recognizer = rec
+                rec.setWords(true)
 
                 _status.value = TranscriptionEngineStatus.Listening
 
-                // TODO: Vosk API — open AudioRecord at SAMPLE_RATE_HZ, feed PCM buffers to
-                //   recognizer.acceptWaveForm(buffer, bytesRead), then call:
-                //     if (recognizer.acceptWaveForm(buffer, bytesRead)) {
-                //       emitResult(recognizer.result, TranscriptStability.Final)
-                //     } else {
-                //       emitResult(recognizer.partialResult, TranscriptStability.Partial)
-                //     }
-                //   Emit final result on loop exit:
-                //     emitResult(recognizer.finalResult, TranscriptStability.Final)
-
-                // Architecture placeholder: block until stop() sets shouldRun = false.
-                // Real recognition runs the loop above instead.
-                while (shouldRun) {
-                    kotlinx.coroutines.delay(500)
+                source.collect { frame ->
+                    if (!shouldRun) return@collect
+                    val bytes = frame.samples.toLeByteArray()
+                    if (rec.acceptWaveForm(bytes, bytes.size)) {
+                        emitResult(rec.result, TranscriptStability.Final)
+                    } else {
+                        emitResult(rec.partialResult, TranscriptStability.Partial)
+                    }
                 }
+
+                // Flush any buffered speech after the audio stream ends.
+                if (shouldRun) {
+                    emitResult(rec.finalResult, TranscriptStability.Final)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (shouldRun) {
                     _status.value = TranscriptionEngineStatus.Error
                 }
             } finally {
-                // TODO: Vosk API — close recognizer and model: recognizer.close(); model.close()
+                recognizer?.close()
+                model?.close()
             }
         }
     }
 
     private fun emitResult(jsonResult: String, stability: TranscriptStability) {
-        // TODO: Vosk API — replace the body below with actual JSON parsing before enabling.
-        // Vosk final results use {"text": "hello world"}, partials use {"partial": "hello"}.
-        // Passing raw JSON as-is will produce incorrect transcript text at runtime.
-        // This method is not yet called from runRecognition() pending full Vosk integration.
-        val text = jsonResult.trim()
+        val text = parseVoskResult(jsonResult, stability)
         if (text.isEmpty()) return
         scope.launch {
             _updates.emit(
@@ -180,5 +196,36 @@ class VoskLocalTranscriber(
             VoskLocalTranscriber(
                 modelDirectory = File(context.applicationContext.filesDir, DEFAULT_MODEL_DIR)
             )
+
+        /**
+         * Extracts plain transcript text from a Vosk JSON result string.
+         *
+         * Vosk final results use `{"text": "hello world", ...}` and partial results use
+         * `{"partial": "hello"}`. Returns an empty string on parse failure or missing key.
+         *
+         * Marked `internal` for direct unit testing without running on-device recognition.
+         */
+        internal fun parseVoskResult(json: String, stability: TranscriptStability): String {
+            if (json.isBlank()) return ""
+            return try {
+                val key = if (stability == TranscriptStability.Partial) "partial" else "text"
+                // Vosk emits compact JSON — a simple regex is lightweight and sufficient.
+                val regex = Regex(""""$key"\s*:\s*"([^"]*)"""")
+                regex.find(json)?.groupValues?.getOrElse(1) { "" }?.trim() ?: ""
+            } catch (_: Exception) {
+                ""
+            }
+        }
     }
+}
+
+/** Converts 16-bit PCM samples to little-endian byte pairs as required by the Vosk recognizer. */
+private fun ShortArray.toLeByteArray(): ByteArray {
+    val bytes = ByteArray(size * Short.SIZE_BYTES)
+    for (i in indices) {
+        val s = this[i].toInt()
+        bytes[i * 2] = (s and 0xFF).toByte()
+        bytes[i * 2 + 1] = (s ushr 8 and 0xFF).toByte()
+    }
+    return bytes
 }

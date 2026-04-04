@@ -122,7 +122,10 @@ The active backend is visible in the debug panel as **Transcript backend**.
 
 #### Enabling Vosk (required for the primary backend to be active)
 
-Vosk requires model assets on the device. Until model files are present, the app falls back to Android SpeechRecognizer automatically and shows "model unavailable" in the debug panel.
+Vosk requires model assets on the device. The Vosk library and JNA companion are already wired
+as dependencies in `transcription/build.gradle.kts`. Until model files are pushed to the device,
+the app falls back to Android SpeechRecognizer automatically and shows "model unavailable" in
+the debug panel.
 
 To install the model:
 1. Download a small English model from https://alphacephei.com/vosk/models (e.g. `vosk-model-small-en-us-0.15.zip`)
@@ -133,12 +136,9 @@ To install the model:
    Or copy to `context.filesDir/vosk-model-small-en-us` via `adb shell`.
 3. Restart the session. The Vosk backend will activate automatically.
 
-> **Note:** To also add the Vosk Java library (required for actual recognition beyond model-availability checking), add to `transcription/build.gradle.kts`:
-> ```
-> implementation("com.alphacephei:vosk-android:0.3.47@aar")
-> implementation("net.java.dev.jna:jna:5.13.0@aar")
-> ```
-> Then implement the `TODO: Vosk API` sections in `VoskLocalTranscriber.runRecognition()`.
+The model directory must contain `am/final.mdl` (standard Vosk layout) or a top-level `final.mdl`
+(flat model layout). The recognizer runs at 16 kHz, mono, 16-bit PCM — the same rate as the app's
+existing audio pipeline. No second AudioRecord is opened; Vosk reads from the shared frame stream.
 
 #### What transcription provides
 
@@ -147,7 +147,6 @@ To install the model:
 - Explicit status states: listening, partial transcript, final transcript, model unavailable, error
 - Heuristic est-WPM as secondary fallback when transcript is pending or unavailable
 
-> Notes: when Vosk is not yet fully integrated (no library added), the dedicated backend checks model availability but cannot produce transcripts. The Android SpeechRecognizer fallback activates instead.
 > Transcription setting changes apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
 > Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending by design.

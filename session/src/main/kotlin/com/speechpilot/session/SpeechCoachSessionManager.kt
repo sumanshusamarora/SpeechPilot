@@ -128,12 +128,16 @@ class SpeechCoachSessionManager(
                 )
             }
             audioCapture.start()
-            startTranscriptionCollector()
 
-            // Share frames between the frame-level activity monitor and the segmenter so
-            // AudioRecord is only opened once.
+            // Share frames between the frame-level activity monitor, segmenter, and the
+            // Vosk transcriber so AudioRecord is only opened once.
             val sharedFrames = audioCapture.frames()
                 .shareIn(this, SharingStarted.Eagerly, replay = 0)
+
+            // Provide the shared audio stream to the transcriber before starting it.
+            // Vosk reads from this stream directly; Android SpeechRecognizer ignores it.
+            localTranscriber.setAudioSource(sharedFrames)
+            startTranscriptionCollector()
 
             // Frame-level monitor: updates micLevel and isSpeechActive at a ~100 ms cadence.
             // This runs in parallel with segmentation and keeps the UI feeling alive even when

@@ -1,5 +1,6 @@
 package com.speechpilot.transcription
 
+import com.speechpilot.audio.AudioFrame
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +52,11 @@ class RoutingLocalTranscriber(
 
     private var routingJob: Job? = null
     private var activeTranscriber: LocalTranscriber? = null
+
+    override fun setAudioSource(frames: Flow<AudioFrame>) {
+        primaryTranscriber.setAudioSource(frames)
+        fallbackTranscriber.setAudioSource(frames)
+    }
 
     override suspend fun start() {
         if (routingJob?.isActive == true) return

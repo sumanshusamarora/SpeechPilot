@@ -1,6 +1,7 @@
 package com.speechpilot.transcription
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -56,7 +57,68 @@ class VoskLocalTranscriberTest {
     }
 
     // -------------------------------------------------------------------------------------
-    // Lifecycle and status
+    // parseVoskResult — JSON parsing logic, no Android context or Vosk runtime required
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `parseVoskResult extracts text from final result JSON`() {
+        val json = """{"text": "hello world", "result": []}"""
+        assertEquals("hello world", VoskLocalTranscriber.parseVoskResult(json, TranscriptStability.Final))
+    }
+
+    @Test
+    fun `parseVoskResult extracts partial from partial result JSON`() {
+        val json = """{"partial": "hello"}"""
+        assertEquals("hello", VoskLocalTranscriber.parseVoskResult(json, TranscriptStability.Partial))
+    }
+
+    @Test
+    fun `parseVoskResult returns empty for missing key in final result`() {
+        val json = """{"partial": "hello"}"""
+        assertEquals("", VoskLocalTranscriber.parseVoskResult(json, TranscriptStability.Final))
+    }
+
+    @Test
+    fun `parseVoskResult returns empty for missing key in partial result`() {
+        val json = """{"text": "hello world"}"""
+        assertEquals("", VoskLocalTranscriber.parseVoskResult(json, TranscriptStability.Partial))
+    }
+
+    @Test
+    fun `parseVoskResult returns empty for blank input`() {
+        assertEquals("", VoskLocalTranscriber.parseVoskResult("", TranscriptStability.Final))
+        assertEquals("", VoskLocalTranscriber.parseVoskResult("  ", TranscriptStability.Partial))
+    }
+
+    @Test
+    fun `parseVoskResult returns empty for empty text field`() {
+        val json = """{"text": ""}"""
+        assertEquals("", VoskLocalTranscriber.parseVoskResult(json, TranscriptStability.Final))
+    }
+
+    @Test
+    fun `parseVoskResult trims whitespace from extracted text`() {
+        val json = """{"text": "  spaced out  "}"""
+        assertEquals("spaced out", VoskLocalTranscriber.parseVoskResult(json, TranscriptStability.Final))
+    }
+
+    @Test
+    fun `parseVoskResult handles compact JSON without spaces`() {
+        val json = """{"text":"compact result"}"""
+        assertEquals("compact result", VoskLocalTranscriber.parseVoskResult(json, TranscriptStability.Final))
+    }
+
+    // -------------------------------------------------------------------------------------
+    // setAudioSource
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `setAudioSource does not throw and does not change status`() {
+        val transcriber = makeTranscriber(File(tempFolder.root, "model"))
+        transcriber.setAudioSource(emptyFlow())
+        assertEquals(TranscriptionEngineStatus.Disabled, transcriber.status.value)
+    }
+
     // -------------------------------------------------------------------------------------
 
     @Test
