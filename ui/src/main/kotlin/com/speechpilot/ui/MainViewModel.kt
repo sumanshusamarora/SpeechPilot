@@ -8,6 +8,9 @@ import com.speechpilot.data.RoomSessionRepository
 import com.speechpilot.data.SpeechPilotDatabase
 import com.speechpilot.feedback.ThresholdFeedbackDecision
 import com.speechpilot.feedback.VibrationFeedbackDispatcher
+import com.speechpilot.modelmanager.DefaultLocalModelManager
+import com.speechpilot.modelmanager.KnownModels
+import com.speechpilot.modelmanager.ModelInstallState
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.SessionState
 import com.speechpilot.session.SpeechCoachSessionManager
@@ -31,23 +34,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SpeechPilotDatabase.getInstance(getApplication()).sessionDao()
     )
 
+    private val modelManager = DefaultLocalModelManager(
+        filesDir = getApplication<Application>().filesDir,
+        scope = viewModelScope,
+    )
+
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
     private var latestPreferences = UserPreferences()
     private var sessionManager: SpeechCoachSessionManager? = null
     private var liveStateJob: Job? = null
+    private var modelStateJob: Job? = null
 
     init {
+        observeModelState()
         viewModelScope.launch {
             appSettings.preferences.collect { prefs ->
                 latestPreferences = prefs
                 _uiState.update { it.copy(transcriptionEnabled = prefs.transcriptionEnabled) }
+                if (prefs.transcriptionEnabled) {
+                    triggerVoskProvisioning()
+                }
                 val isSessionActive = sessionManager?.liveState?.value?.sessionState == SessionState.Active
                 if (!isSessionActive) {
                     recreateSessionManager(prefs)
                 }
             }
+        }
+    }
+
+    /** Starts observing the Vosk model install state and mirrors it into [uiState]. */
+    private fun observeModelState() {
+        modelStateJob = viewModelScope.launch {
+            modelManager.stateOf(KnownModels.VOSK_SMALL_EN_US.id).collect { installState ->
+                _uiState.update { it.copy(voskModelInstallState = installState) }
+            }
+        }
+    }
+
+    /**
+     * Requests provisioning of the Vosk model if it is not yet [ModelInstallState.Ready].
+     * The [modelManager] deduplicates concurrent requests, so this is safe to call on every
+     * preference update.
+     */
+    private fun triggerVoskProvisioning() {
+        viewModelScope.launch {
+            modelManager.ensureInstalled(KnownModels.VOSK_SMALL_EN_US.id)
+        }
+    }
+
+    /** Retries a failed Vosk model download. Called from the UI retry action. */
+    fun retryVoskModelInstall() {
+        viewModelScope.launch {
+            modelManager.retry(KnownModels.VOSK_SMALL_EN_US.id)
         }
     }
 
@@ -214,6 +254,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         liveStateJob?.cancel()
+        modelStateJob?.cancel()
         sessionManager?.release()
     }
 }

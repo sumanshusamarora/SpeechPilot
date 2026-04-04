@@ -29,6 +29,7 @@ SpeechPilot is structured as a multi-module Android project. Each module has a s
 | `data` | Persistence (Room, repositories) |
 | `settings` | User configuration (DataStore) |
 | `transcription` | Local transcription — Vosk preferred backend, Android SR fallback, rolling transcript WPM |
+| `modelmanager` | Generic on-device model provisioning — download, install, state tracking for Vosk and future models |
 
 See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full architecture description.
 
@@ -110,7 +111,7 @@ The app uses a **two-tier backend architecture**:
 | Backend | Role | Condition |
 |---|---|---|
 | **Vosk** (`VoskLocalTranscriber`) | **Preferred** — deterministic on-device STT, no cloud dependency | Active when model assets are installed |
-| **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when Vosk model is absent |
+| **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when Vosk model is absent or still provisioning |
 | **No-op** (`NoOpLocalTranscriber`) | Transcription disabled | Settings → Transcription turned off |
 
 Selection is performed automatically by `RoutingLocalTranscriber` at session start:
@@ -120,25 +121,31 @@ Selection is performed automatically by `RoutingLocalTranscriber` at session sta
 
 The active backend is visible in the debug panel as **Transcript backend**.
 
-#### Enabling Vosk (required for the primary backend to be active)
+#### Automatic Vosk model provisioning
 
-Vosk requires model assets on the device. The Vosk library and JNA companion are already wired
-as dependencies in `transcription/build.gradle.kts`. Until model files are pushed to the device,
-the app falls back to Android SpeechRecognizer automatically and shows "model unavailable" in
-the debug panel.
+**No manual setup is required.** When transcription is enabled (the default), the app automatically
+downloads and installs the Vosk speech model on first launch.
 
-To install the model:
-1. Download a small English model from https://alphacephei.com/vosk/models (e.g. `vosk-model-small-en-us-0.15.zip`)
-2. Unzip and push to the device:
-   ```bash
-   adb push vosk-model-small-en-us /sdcard/Android/data/com.speechpilot/files/vosk-model-small-en-us
-   ```
-   Or copy to `context.filesDir/vosk-model-small-en-us` via `adb shell`.
-3. Restart the session. The Vosk backend will activate automatically.
+The model (`vosk-model-small-en-us-0.22`, ~40 MB) is downloaded from
+https://alphacephei.com/vosk/models and installed to `filesDir/vosk-model-small-en-us`. A
+**Speech Model** status card on the main screen shows download progress and the current install
+state. Once installation completes, the card disappears and Vosk becomes the active backend.
 
-The model directory must contain `am/final.mdl` (standard Vosk layout) or a top-level `final.mdl`
-(flat model layout). The recognizer runs at 16 kHz, mono, 16-bit PCM — the same rate as the app's
-existing audio pipeline. No second AudioRecord is opened; Vosk reads from the shared frame stream.
+If the download fails, the card shows the failure reason and a **Retry Download** button.
+While the model is being provisioned, the Android SpeechRecognizer fallback is used automatically.
+
+Model install states: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Ready` / `Failed`
+
+#### Local model storage layout
+
+```
+filesDir/
+  vosk-model-small-en-us/       ← Vosk STT model (auto-provisioned)
+    am/final.mdl                 ← acoustic model (readiness marker)
+    conf/
+    graph/
+    …
+```
 
 #### What transcription provides
 
@@ -151,6 +158,34 @@ existing audio pipeline. No second AudioRecord is opened; Vosk reads from the sh
 > Transcript text is kept in-memory for the current session and is not stored in session history.
 > Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending by design.
 > Coaching decisions use transcript-derived WPM when transcript readiness is reached. Until then, the app falls back explicitly to heuristic pace.
+
+---
+
+### Local model management
+
+SpeechPilot uses a generic model provisioning system (`modelmanager` module) to automatically
+manage on-device AI model assets. The system is not Vosk-specific — it is designed to support
+additional model families in future iterations (e.g. Gemma 4 E2B on-device LLM).
+
+Key abstractions:
+
+| Class | Role |
+|---|---|
+| `LocalModelDescriptor` | Model metadata: id, type, download URL, install path, version, optional checksum |
+| `ModelInstallState` | Observable state machine: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Verifying` → `Ready` / `Failed` |
+| `LocalModelManager` | Interface: `ensureInstalled()`, `stateOf()`, `isReady()`, `retry()` |
+| `DefaultLocalModelManager` | Concrete implementation: `HttpURLConnection` download, `ZipInputStream` extract, atomic staging rename |
+| `KnownModels` | Predefined model registry — add new models here |
+
+Adding a new model (e.g. Gemma 4 E2B) requires only adding a `LocalModelDescriptor` to
+`KnownModels.all` and calling `ensureInstalled()` from the appropriate ViewModel — no changes
+to provisioning logic.
+
+**Known limitations (first iteration):**
+- Downloads are not resumable across process restarts
+- No WorkManager background scheduling — provisioning is tied to ViewModel scope
+- No automatic retry; user must press Retry on failure
+- No WiFi-only gating or download size warnings
 
 ---
 

@@ -347,6 +347,73 @@ is unaffected.
 
 ---
 
+## Iteration 19 — Local Model Provisioning System ✅
+
+**Goal:** Eliminate the manual ADB model installation requirement. Automatically download and
+install the Vosk speech model when missing. Add a generic model-management layer that can later
+support additional models (e.g. Gemma 4 E2B).
+
+**Motivation:**
+- Vosk requires model assets at `filesDir/vosk-model-small-en-us` before it can run
+- Previous setup required manual `adb push` — not viable for normal users
+- Users had no visibility into why transcription wasn't using the Vosk backend
+- A generic provisioning layer is needed to scale to future on-device models
+
+**Changes:**
+- [x] Introduce `:modelmanager` module — generic local model management infrastructure:
+  - `ModelType` enum (`STT`, `LLM`) — model family classification
+  - `LocalModelDescriptor` data class — id, type, purpose, downloadUrl, installDirName, archiveRootDir, version, optional sha256
+  - `ModelInstallState` sealed class — `NotInstalled`, `Queued`, `Downloading(progress)`, `Unpacking`, `Verifying`, `Ready`, `Failed(reason)`
+  - `LocalModelManager` interface — `stateOf()`, `isReady()`, `ensureInstalled()`, `retry()`
+  - `DefaultLocalModelManager` — downloads archive via `HttpURLConnection`, extracts via `ZipInputStream`, strips archive root prefix, uses staging directory for atomic install; state exposed as `StateFlow`
+  - `KnownModels` object — registry of predefined model descriptors; currently contains `VOSK_SMALL_EN_US`; includes commented-out placeholder for future `GEMMA_4_E2B`
+- [x] Implement Vosk model as first managed model (`KnownModels.VOSK_SMALL_EN_US`):
+  - Downloads `vosk-model-small-en-us-0.22.zip` (~40 MB) from alphacephei.com
+  - Extracts to `filesDir/vosk-model-small-en-us` with root-dir stripping
+  - Readiness check mirrors `VoskLocalTranscriber.isModelAvailable()`: looks for `am/final.mdl` or flat `final.mdl`
+- [x] Add `INTERNET` permission to `app/src/main/AndroidManifest.xml`
+- [x] Register `:modelmanager` in `settings.gradle.kts`
+- [x] Add `:modelmanager` dependency to `ui/build.gradle.kts`
+- [x] Add `voskModelInstallState: ModelInstallState?` to `MainUiState`
+- [x] Update `MainViewModel`:
+  - Creates `DefaultLocalModelManager` (bound to `viewModelScope`)
+  - Calls `ensureInstalled(VOSK_SMALL_EN_US.id)` when transcription is enabled at startup or on pref change
+  - Observes model state flow and mirrors it into `MainUiState`
+  - Exposes `retryVoskModelInstall()` for UI retry action
+- [x] Add `ModelProvisioningCard` composable to `MainScreen`:
+  - Shown when transcription is enabled and model is not yet `Ready`
+  - Progress bar + byte-level progress text during `Downloading`
+  - Indeterminate spinner for `Queued`, `Unpacking`, `Verifying`
+  - Error message + Retry button on `Failed`
+  - Disappears automatically when model becomes `Ready`
+- [x] Add `DefaultLocalModelManagerTest` covering:
+  - Readiness detection from disk (`am/final.mdl`, flat `final.mdl`, absent directory)
+  - `ensureInstalled` is a no-op when already Ready
+  - `ensureInstalled` transitions to Queued then Failed on no-network
+  - `retry` is a no-op when not Failed; re-starts provisioning from Failed state
+  - `knownModels` registry contains Vosk model
+  - Unknown model id throws
+  - `isInstalledOnDisk` path resolution
+  - `extractArchive` strips root prefix, handles missing directory entry, removes stale install
+  - `sha256Hex` correct digest for known content
+- [x] Update README.md with model provisioning section
+- [x] Update `phase1_architecture.md` with `:modelmanager` module documentation
+- [x] Update `plan.md`
+
+**Architecture note:** `DefaultLocalModelManager` is designed to be fully model-agnostic. Adding
+Gemma 4 E2B support in a future iteration requires only:
+1. Adding a `GEMMA_4_E2B` entry to `KnownModels`
+2. Optionally extending `isInstalledOnDisk` with LLM-specific readiness heuristics
+3. Calling `ensureInstalled("gemma-4-e2b")` in the appropriate ViewModel
+
+**Known limitations (first iteration):**
+- Downloads are not resumable. A mid-download process kill discards the partial archive; provisioning restarts on next app launch.
+- No WorkManager scheduling. Provisioning runs in `viewModelScope` and is cancelled if the ViewModel is cleared before download completes.
+- No automatic retry on network failure; user must press Retry in the UI.
+- No per-model download quotas or WiFi-only gating.
+
+---
+
 ## Iteration 7 — Polish and QA
 
 **Goal:** Release-candidate quality.
