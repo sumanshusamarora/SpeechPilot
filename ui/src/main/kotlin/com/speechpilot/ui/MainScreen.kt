@@ -574,21 +574,19 @@ private fun WhisperRuntimeWarningCard() {
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                text = "Whisper runtime unavailable",
+                text = "Whisper runtime unavailable — using Android fallback",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "libwhisper_jni.so could not be loaded on this device. " +
-                    "Whisper.cpp inference will not run. " +
-                    "Android SpeechRecognizer is active as fallback.",
+                text = "The Whisper speech engine could not start on this device. " +
+                    "Transcription is running via Android SpeechRecognizer instead.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Text(
-                text = "To fix: build the app with NDK native compilation enabled " +
-                    "(./gradlew assembleDebug). Network access is required on first build.",
+                text = "Try reinstalling the app if Whisper was expected to be available.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
