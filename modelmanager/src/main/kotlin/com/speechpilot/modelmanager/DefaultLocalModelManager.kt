@@ -204,7 +204,8 @@ class DefaultLocalModelManager(
             val responseCode = conn.responseCode
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 stateFlow.value = ModelInstallState.Failed(
-                    reason = "HTTP $responseCode while downloading ${descriptor.id}.",
+                    reason = "HTTP $responseCode while downloading ${descriptor.id} " +
+                        "from ${descriptor.downloadUrl}.",
                 )
                 return
             }
