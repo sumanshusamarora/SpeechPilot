@@ -426,6 +426,68 @@ Gemma 4 E2B support in a future iteration requires only:
 
 ---
 
+## Iteration 8 — Whisper.cpp Alternative STT Backend
+
+**Goal:** Add Whisper.cpp as a real on-device STT backend to enable transcript quality comparison, especially for accented English (e.g. Indian English). Use `ggml-small.bin` as the default model.
+
+**Motivation:** Vosk transcript quality for accented English speakers is inconsistent. Whisper.cpp may provide better results. This iteration adds the backend behind the existing routing abstraction so both can be evaluated side-by-side.
+
+- [x] **Extend model provisioning for single-file models**
+  - Add `ModelArchiveFormat` enum (`ZIP`, `SINGLE_FILE`)
+  - Extend `LocalModelDescriptor` with `archiveFormat` and `singleFileName` fields
+  - Update `DefaultLocalModelManager.provision()` to handle `SINGLE_FILE` (direct binary placement, no extraction)
+  - Update `isInstalledOnDisk()` to check single-file binary existence
+  - Add `installSingleFile()` helper
+  - Register `WHISPER_GGML_SMALL` in `KnownModels`:
+    - Model ID: `whisper-ggml-small`
+    - File: `ggml-small.bin`
+    - URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
+    - Install path: `filesDir/whisper/ggml-small.bin`
+- [x] **Add `WhisperCpp` to `TranscriptionBackend` enum**
+- [x] **Add `WhisperNative.kt`** — JNI bridge for whisper.cpp native library
+  - Attempts `System.loadLibrary("whisper")` at init; `isAvailable` flag
+  - Declares `external` functions: `whisperInit`, `whisperFull`, `whisperFullNSegments`, `whisperFullGetSegmentText`, `whisperFree`
+  - Native library ships as `transcription/src/main/jniLibs/*/libwhisper.so` (compiled externally, not in repo)
+- [x] **Add `WhisperCppLocalTranscriber.kt`**
+  - Consumes shared PCM audio via `setAudioSource()` (same as Vosk)
+  - Buffers 5-second PCM chunks, converts Short→Float, runs inference via `WhisperRunner`
+  - Emits **Final-only** `TranscriptUpdate` (no streaming partials — chunk-based by design)
+  - Reports `ModelUnavailable` if model file absent or native library not loaded
+  - Full lifecycle: `start()`/`stop()`, off main thread (IO dispatcher)
+  - `activeBackend` always returns `TranscriptionBackend.WhisperCpp`
+- [x] **Add `WhisperRunner` interface + `WhisperNativeRunner` + `FakeWhisperRunner`**
+  - Testability: tests inject `FakeWhisperRunner` without native library
+- [x] **Backend selection preference**
+  - Add `preferWhisperBackend: Boolean` to `UserPreferences` (default: `false`)
+  - Persist in `DataStoreAppSettings`
+  - `MainViewModel.recreateSessionManager()` selects `WhisperCppLocalTranscriber` when `true`
+  - Provisioning trigger routes to `triggerWhisperModelProvisioning()` when Whisper is selected
+- [x] **UI changes**
+  - Add `whisperModelInstallState: ModelInstallState?` to `MainUiState`
+  - `MainViewModel.observeModelState()` watches both Vosk and Whisper model states
+  - Add `retryWhisperModelInstall()` method
+  - `SettingsScreen`: new "Use Whisper.cpp backend" toggle (shown when transcription is enabled)
+  - `SettingsViewModel.updatePreferWhisperBackend(Boolean)`
+- [x] **Tests**
+  - `WhisperCppLocalTranscriberTest`: model availability checks, lifecycle, ModelUnavailable paths, Error on bad init context, Listening state, transcript emission with `FakeWhisperRunner`, model path consistency with `KnownModels`
+  - `DefaultLocalModelManagerTest`: SINGLE_FILE `isInstalledOnDisk`, `installSingleFile` placement and replacement, Whisper model in `knownModels`, SINGLE_FILE readiness at init
+- [x] **Documentation**: Update README.md, phase1_architecture.md, plan.md
+
+**Architecture notes:**
+- Whisper is integrated behind the existing `LocalTranscriber` interface and `RoutingLocalTranscriber` — no changes to session orchestration
+- Chunk-based inference is honest about semantics: Final-only updates, inherent latency up to chunk duration
+- `RoutingLocalTranscriber` fallback to Android SR works identically regardless of whether Vosk or Whisper is the primary
+- `ModelArchiveFormat.SINGLE_FILE` makes the provisioning system directly usable for future Gemma weights
+
+**Remaining limitations:**
+- `libwhisper.so` is not bundled in this repo and must be compiled from source using Android NDK
+- Without the native library, the Whisper backend always reports `ModelUnavailable` and falls back to Android SR
+- Whisper ggml-small model is ~466 MB — significantly larger than Vosk (~40 MB)
+- Chunk-based inference adds up to 5 seconds latency vs Vosk's streaming frame output
+- No WorkManager for large background downloads; Whisper model download may be interrupted if app is backgrounded
+
+---
+
 ## Deferred / Out of Scope (unless explicitly requested)
 
 - Cloud upload or sync

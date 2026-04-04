@@ -28,8 +28,8 @@ SpeechPilot is structured as a multi-module Android project. Each module has a s
 | `feedback` | Decisioning and feedback events |
 | `data` | Persistence (Room, repositories) |
 | `settings` | User configuration (DataStore) |
-| `transcription` | Local transcription — Vosk preferred backend, Android SR fallback, rolling transcript WPM |
-| `modelmanager` | Generic on-device model provisioning — download, install, state tracking for Vosk and future models |
+| `transcription` | Local transcription — Vosk or Whisper.cpp primary backend, Android SR fallback, rolling transcript WPM |
+| `modelmanager` | Generic on-device model provisioning — download, install, state tracking for Vosk, Whisper, and future models |
 
 See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full architecture description.
 
@@ -106,45 +106,80 @@ Transcription can be disabled in **Settings → Transcription** if not needed.
 
 #### Transcription backend strategy
 
-The app uses a **two-tier backend architecture**:
+The app uses a **two-tier backend architecture** with selectable primary STT backends:
 
 | Backend | Role | Condition |
 |---|---|---|
-| **Vosk** (`VoskLocalTranscriber`) | **Preferred** — deterministic on-device STT, no cloud dependency | Active when model assets are installed |
-| **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when Vosk model is absent or still provisioning |
+| **Vosk** (`VoskLocalTranscriber`) | Primary dedicated STT (default) — deterministic on-device, no cloud | Active when Vosk is selected and model assets are installed |
+| **Whisper.cpp** (`WhisperCppLocalTranscriber`) | Alternative primary STT — better for accented English (e.g. Indian English) | Active when Whisper is selected and model + native library are present |
+| **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when the selected primary backend is unavailable |
 | **No-op** (`NoOpLocalTranscriber`) | Transcription disabled | Settings → Transcription turned off |
 
+**Backend selection:** The primary STT backend is selectable in **Settings → Use Whisper.cpp backend**:
+- **Off (default):** Vosk is the primary backend
+- **On:** Whisper.cpp is the primary backend
+
 Selection is performed automatically by `RoutingLocalTranscriber` at session start:
-1. Attempt to start the Vosk backend
+1. Start the selected primary backend (Vosk or Whisper.cpp)
 2. If it reports `ModelUnavailable`, stop it and activate the Android SpeechRecognizer fallback
 3. Expose the active backend in `TranscriptDebugState.activeBackend`
 
 The active backend is visible in the debug panel as **Transcript backend**.
 
-#### Automatic Vosk model provisioning
+#### Vosk backend (default)
 
-**No manual setup is required.** When transcription is enabled (the default), the app automatically
-downloads and installs the Vosk speech model on first launch.
+- Model: `vosk-model-small-en-us` (~40 MB compressed)
+- Streaming frame-by-frame recognition with partial and final results
+- Low latency, deterministic offline
 
-The model (`vosk-model-small-en-us-0.22`, ~40 MB) is downloaded from
-https://alphacephei.com/vosk/models and installed to `filesDir/vosk-model-small-en-us`. A
-**Speech Model** status card on the main screen shows download progress and the current install
-state. Once installation completes, the card disappears and Vosk becomes the active backend.
+#### Whisper.cpp backend
 
-If the download fails, the card shows the failure reason and a **Retry Download** button.
-While the model is being provisioned, the Android SpeechRecognizer fallback is used automatically.
+- Model: `ggml-small.bin` (~466 MB)
+- Default URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
+- Chunk-based inference: audio is buffered in 5-second windows before running inference
+- **Final-only updates** — no streaming partial results (inherent to Whisper's design)
+- May produce better transcript quality for accented English
+- Requires the `libwhisper.so` native library bundled in the APK (see "Whisper native library" below)
 
-Model install states: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Ready` / `Failed`
+##### Whisper native library
+
+Whisper.cpp requires a pre-compiled native library. The library is **not bundled** in this repository. To build it:
+
+1. Clone `whisper.cpp`: `git clone https://github.com/ggerganov/whisper.cpp`
+2. Follow the Android NDK build instructions in [`examples/whisper.android/README.md`](https://github.com/ggerganov/whisper.cpp/blob/master/examples/whisper.android/README.md)
+3. Place the resulting `.so` files in `transcription/src/main/jniLibs/`:
+   ```
+   transcription/src/main/jniLibs/
+     arm64-v8a/libwhisper.so
+     x86_64/libwhisper.so
+   ```
+
+Without the native library, the Whisper backend reports `ModelUnavailable` and the app falls back to Android SpeechRecognizer automatically.
+
+#### Automatic model provisioning
+
+**No manual setup is required.** When transcription is enabled, the app automatically downloads and installs the selected backend's model on first launch:
+
+- **Vosk model** is provisioned automatically when Vosk is the selected backend
+- **Whisper model** is provisioned automatically when Whisper is the selected backend
+
+A **Speech Model** status card shows download progress and install state on the main screen.
+
+Model install states:
+- Vosk: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Ready` / `Failed`
+- Whisper: `NotInstalled` → `Queued` → `Downloading` → `Ready` / `Failed` *(no unzip needed)*
 
 #### Local model storage layout
 
 ```
 filesDir/
-  vosk-model-small-en-us/       ← Vosk STT model (auto-provisioned)
+  vosk-model-small-en-us/       ← Vosk STT model (auto-provisioned, ~40 MB)
     am/final.mdl                 ← acoustic model (readiness marker)
     conf/
     graph/
     …
+  whisper/                       ← Whisper.cpp model directory (auto-provisioned, ~466 MB)
+    ggml-small.bin               ← ggml model binary (readiness marker)
 ```
 
 #### What transcription provides
@@ -164,17 +199,19 @@ filesDir/
 ### Local model management
 
 SpeechPilot uses a generic model provisioning system (`modelmanager` module) to automatically
-manage on-device AI model assets. The system is not Vosk-specific — it is designed to support
+manage on-device AI model assets. The system is not backend-specific — it supports both zip
+archive models (Vosk) and single-file binary models (Whisper.cpp), and is designed to support
 additional model families in future iterations (e.g. Gemma 4 E2B on-device LLM).
 
 Key abstractions:
 
 | Class | Role |
 |---|---|
-| `LocalModelDescriptor` | Model metadata: id, type, download URL, install path, version, optional checksum |
-| `ModelInstallState` | Observable state machine: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Verifying` → `Ready` / `Failed` |
+| `LocalModelDescriptor` | Model metadata: id, type, download URL, install path, archive format, version, optional checksum |
+| `ModelArchiveFormat` | `ZIP` (extract archive) or `SINGLE_FILE` (download binary directly) |
+| `ModelInstallState` | Observable state machine: `NotInstalled` → `Queued` → `Downloading` → `Unpacking`? → `Verifying`? → `Ready` / `Failed` |
 | `LocalModelManager` | Interface: `ensureInstalled()`, `stateOf()`, `isReady()`, `retry()` |
-| `DefaultLocalModelManager` | Concrete implementation: `HttpURLConnection` download, `ZipInputStream` extract, atomic staging rename |
+| `DefaultLocalModelManager` | Concrete implementation: `HttpURLConnection` download, `ZipInputStream` extract (ZIP) or direct file placement (SINGLE_FILE), atomic staging |
 | `KnownModels` | Predefined model registry — add new models here |
 
 Adding a new model (e.g. Gemma 4 E2B) requires only adding a `LocalModelDescriptor` to
