@@ -426,6 +426,68 @@ Gemma 4 E2B support in a future iteration requires only:
 
 ---
 
+## Iteration 8 — Whisper.cpp Alternative STT Backend
+
+**Goal:** Add Whisper.cpp as a real on-device STT backend to enable transcript quality comparison, especially for accented English (e.g. Indian English). Use `ggml-small.bin` as the default model.
+
+**Motivation:** Vosk transcript quality for accented English speakers is inconsistent. Whisper.cpp may provide better results. This iteration adds the backend behind the existing routing abstraction so both can be evaluated side-by-side.
+
+- [x] **Extend model provisioning for single-file models**
+  - Add `ModelArchiveFormat` enum (`ZIP`, `SINGLE_FILE`)
+  - Extend `LocalModelDescriptor` with `archiveFormat` and `singleFileName` fields
+  - Update `DefaultLocalModelManager.provision()` to handle `SINGLE_FILE` (direct binary placement, no extraction)
+  - Update `isInstalledOnDisk()` to check single-file binary existence
+  - Add `installSingleFile()` helper
+  - Register `WHISPER_GGML_SMALL` in `KnownModels`:
+    - Model ID: `whisper-ggml-small`
+    - File: `ggml-small.bin`
+    - URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
+    - Install path: `filesDir/whisper/ggml-small.bin`
+- [x] **Add `WhisperCpp` to `TranscriptionBackend` enum**
+- [x] **Add `WhisperNative.kt`** — JNI bridge for whisper.cpp native library
+  - Attempts `System.loadLibrary("whisper")` at init; `isAvailable` flag
+  - Declares `external` functions: `whisperInit`, `whisperFull`, `whisperFullNSegments`, `whisperFullGetSegmentText`, `whisperFree`
+  - Native library ships as `transcription/src/main/jniLibs/*/libwhisper.so` (compiled externally, not in repo)
+- [x] **Add `WhisperCppLocalTranscriber.kt`**
+  - Consumes shared PCM audio via `setAudioSource()` (same as Vosk)
+  - Buffers 5-second PCM chunks, converts Short→Float, runs inference via `WhisperRunner`
+  - Emits **Final-only** `TranscriptUpdate` (no streaming partials — chunk-based by design)
+  - Reports `ModelUnavailable` if model file absent or native library not loaded
+  - Full lifecycle: `start()`/`stop()`, off main thread (IO dispatcher)
+  - `activeBackend` always returns `TranscriptionBackend.WhisperCpp`
+- [x] **Add `WhisperRunner` interface + `WhisperNativeRunner` + `FakeWhisperRunner`**
+  - Testability: tests inject `FakeWhisperRunner` without native library
+- [x] **Backend selection preference**
+  - Add `preferWhisperBackend: Boolean` to `UserPreferences` (default: `false`)
+  - Persist in `DataStoreAppSettings`
+  - `MainViewModel.recreateSessionManager()` selects `WhisperCppLocalTranscriber` when `true`
+  - Provisioning trigger routes to `triggerWhisperModelProvisioning()` when Whisper is selected
+- [x] **UI changes**
+  - Add `whisperModelInstallState: ModelInstallState?` to `MainUiState`
+  - `MainViewModel.observeModelState()` watches both Vosk and Whisper model states
+  - Add `retryWhisperModelInstall()` method
+  - `SettingsScreen`: new "Use Whisper.cpp backend" toggle (shown when transcription is enabled)
+  - `SettingsViewModel.updatePreferWhisperBackend(Boolean)`
+- [x] **Tests**
+  - `WhisperCppLocalTranscriberTest`: model availability checks, lifecycle, ModelUnavailable paths, Error on bad init context, Listening state, transcript emission with `FakeWhisperRunner`, model path consistency with `KnownModels`
+  - `DefaultLocalModelManagerTest`: SINGLE_FILE `isInstalledOnDisk`, `installSingleFile` placement and replacement, Whisper model in `knownModels`, SINGLE_FILE readiness at init
+- [x] **Documentation**: Update README.md, phase1_architecture.md, plan.md
+
+**Architecture notes:**
+- Whisper is integrated behind the existing `LocalTranscriber` interface and `RoutingLocalTranscriber` — no changes to session orchestration
+- Chunk-based inference is honest about semantics: Final-only updates, inherent latency up to chunk duration
+- `RoutingLocalTranscriber` fallback to Android SR works identically regardless of whether Vosk or Whisper is the primary
+- `ModelArchiveFormat.SINGLE_FILE` makes the provisioning system directly usable for future Gemma weights
+
+**Remaining limitations:**
+- `libwhisper.so` is not bundled in this repo and must be compiled from source using Android NDK
+- Without the native library, the Whisper backend always reports `ModelUnavailable` and falls back to Android SR
+- Whisper ggml-small model is ~466 MB — significantly larger than Vosk (~40 MB)
+- Chunk-based inference adds up to 5 seconds latency vs Vosk's streaming frame output
+- No WorkManager for large background downloads; Whisper model download may be interrupted if app is backgrounded
+
+---
+
 ## Deferred / Out of Scope (unless explicitly requested)
 
 - Cloud upload or sync
@@ -434,3 +496,60 @@ Gemma 4 E2B support in a future iteration requires only:
 - Backend API
 - Analytics / crash reporting
 - DI framework (Hilt / Koin)
+
+---
+
+## Phase 2 — Whisper Backend Stabilisation (iteration 2)
+
+**Goal:** Fix native runtime packaging, move provisioning to WorkManager, tighten active-backend provisioning, improve chunked WPM UX, add model download metadata.
+
+### Changes
+
+- [x] **CMake/JNI native packaging** (`transcription`)
+  - `transcription/src/main/cpp/CMakeLists.txt`: uses `FetchContent` to pull whisper.cpp v1.7.2 from GitHub during `./gradlew assembleDebug` CMake configure
+  - `transcription/src/main/cpp/whisper_jni.cpp`: JNI bridge matching `WhisperNative.kt` `external` function signatures
+  - `transcription/build.gradle.kts`: adds `externalNativeBuild { cmake { path } }`, `ndkVersion = "26.3.11579264"`, `ndk.abiFilters = ["arm64-v8a", "x86_64"]`
+  - No manual build step required: first `./gradlew assembleDebug` downloads and compiles whisper.cpp automatically
+
+- [x] **Model metadata** (`modelmanager/LocalModelDescriptor`)
+  - Added `displayName: String`, `approxSizeMb: Int`, `wifiRecommended: Boolean`
+  - `KnownModels.VOSK_SMALL_EN_US`: displayName="Vosk small (en-US)", approxSizeMb=40, wifiRecommended=false
+  - `KnownModels.WHISPER_GGML_SMALL`: displayName="Whisper small (ggml)", approxSizeMb=466, wifiRecommended=true
+
+- [x] **WorkManager provisioning** (`modelmanager`)
+  - Added `work-runtime-ktx:2.9.1` to `libs.versions.toml` and `modelmanager/build.gradle.kts`
+  - `ModelDownloadWorker` (CoroutineWorker): downloads via `HttpURLConnection`, optional SHA-256 verify, ZIP extract or single-file install, reports progress via `setProgress()` Data
+  - `WorkManagerLocalModelManager` (implements `LocalModelManager`): schedules `ModelDownloadWorker` (REPLACE policy), maps `WorkInfo` → `StateFlow<ModelInstallState>` via `getWorkInfosForUniqueWorkFlow()`
+  - Provisioning now survives app backgrounding — WorkManager reschedules interrupted workers
+
+- [x] **Active-backend-only provisioning** (`ui/MainViewModel`)
+  - Replaced `DefaultLocalModelManager` with `WorkManagerLocalModelManager`
+  - Consolidated two provisioning methods into `triggerActiveBackendModelProvisioning(prefs)` — provisions only the active backend's model
+  - `observeActiveModelState()` restarts when preferences change, observes only the active model
+  - `MainUiState` simplified: replaced `voskModelInstallState` + `whisperModelInstallState` with unified `activeModelInstallState`, `activeModelDisplayName`, `activeModelApproxSizeMb`, `activeModelWifiRecommended`
+  - `MainScreen.ModelProvisioningCard` shows model name, size, and Wi-Fi recommendation
+
+- [x] **Chunk-based WPM hold** (`transcription`)
+  - `RollingTranscriptWpmCalculator`: new `chunkBased` mode; when enabled, `heldWpm` is preserved for `wpmHoldDurationMs` (default 2× chunk duration = 10 s) after each Final update, preventing oscillation between chunks
+  - `setChunkBased(Boolean)` allows runtime reconfiguration
+  - `TranscriptWpmSnapshot` gains `isChunkBased: Boolean`, `lastChunkAtMs: Long?`
+  - `TranscriptDebugState` gains `isChunkBased: Boolean`, `lastChunkAtMs: Long?`
+  - `SpeechCoachSessionManager.startTranscriptionCollector()` sets `chunkBased=true` when active backend is `WhisperCpp`
+
+- [x] **Tests**
+  - `RollingTranscriptWpmCalculatorTest`: 9 new chunk/hold tests covering chunk mode, hold behavior, expiry, reset
+  - `WorkManagerLocalModelManagerTest`: disk-check logic (SINGLE_FILE and ZIP), model metadata validation, work-name uniqueness
+
+- [x] **Documentation**: Updated README.md, phase1_architecture.md, plan.md
+
+**Architecture notes:**
+- `WorkManagerLocalModelManager` replaces `DefaultLocalModelManager` in production; `DefaultLocalModelManager` is retained for unit tests
+- The CMake `FetchContent` approach mirrors standard Android native library patterns; no hidden manual steps
+- `chunkBased` WPM hold is transparent to the pace decision layer — `selectPaceSignal()` sees the same smooth WPM signal regardless of backend
+- `LocalModelDescriptor` metadata fields (`displayName`, `approxSizeMb`, `wifiRecommended`) are generic — future Gemma models will use the same fields
+
+**Remaining limitations:**
+- Downloads are not resumable (partial temp file deleted; download restarts from zero)
+- No automatic retry on transient failure — user must press Retry
+- First CMake build requires network to fetch whisper.cpp source (~100 MB)
+- Whisper inference on the `small` model is CPU-only (no GPU/Metal acceleration) — may be slow on low-end devices

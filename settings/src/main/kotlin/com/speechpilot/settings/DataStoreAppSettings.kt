@@ -44,7 +44,8 @@ class DataStoreAppSettings(context: Context) : AppSettings {
                 tolerancePct = store[Keys.TOLERANCE_PCT] ?: defaults.tolerancePct,
                 feedbackCooldownMs = store[Keys.FEEDBACK_COOLDOWN_MS] ?: defaults.feedbackCooldownMs,
                 micSampleRate = store[Keys.MIC_SAMPLE_RATE] ?: defaults.micSampleRate,
-                transcriptionEnabled = store[Keys.TRANSCRIPTION_ENABLED] ?: defaults.transcriptionEnabled
+                transcriptionEnabled = store[Keys.TRANSCRIPTION_ENABLED] ?: defaults.transcriptionEnabled,
+                preferWhisperBackend = store[Keys.PREFER_WHISPER_BACKEND] ?: defaults.preferWhisperBackend,
             )
         }
 
@@ -55,6 +56,7 @@ class DataStoreAppSettings(context: Context) : AppSettings {
             store[Keys.FEEDBACK_COOLDOWN_MS] = prefs.feedbackCooldownMs
             store[Keys.MIC_SAMPLE_RATE] = prefs.micSampleRate
             store[Keys.TRANSCRIPTION_ENABLED] = prefs.transcriptionEnabled
+            store[Keys.PREFER_WHISPER_BACKEND] = prefs.preferWhisperBackend
         }
     }
 
@@ -64,5 +66,6 @@ class DataStoreAppSettings(context: Context) : AppSettings {
         val FEEDBACK_COOLDOWN_MS = longPreferencesKey("feedback_cooldown_ms")
         val MIC_SAMPLE_RATE = intPreferencesKey("mic_sample_rate")
         val TRANSCRIPTION_ENABLED = booleanPreferencesKey("transcription_enabled")
+        val PREFER_WHISPER_BACKEND = booleanPreferencesKey("prefer_whisper_backend")
     }
 }

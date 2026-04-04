@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -20,26 +19,31 @@ import java.util.zip.ZipInputStream
 /**
  * Default implementation of [LocalModelManager].
  *
- * Models are downloaded as zip archives to a temporary staging file inside [filesDir], then
- * extracted into the final [LocalModelDescriptor.installDirName] directory. If the archive's
- * root directory matches [LocalModelDescriptor.archiveRootDir], the prefix is stripped so the
- * model contents land directly in [installDirName] without an extra nesting level.
+ * Supports two model packaging formats:
+ * - [ModelArchiveFormat.ZIP]: Downloaded archive is extracted into [LocalModelDescriptor.installDirName].
+ * - [ModelArchiveFormat.SINGLE_FILE]: Single binary is downloaded and placed at
+ *   `filesDir/installDirName/singleFileName` with no extraction step.
  *
- * ## Provisioning flow
+ * ## Provisioning flow — ZIP models
  *
  * ```
  * ensureInstalled(id)
  *   → already Ready?        → return (no-op)
- *   → NotInstalled/Failed?  → Queued
- *                             → Downloading (progress updates)
- *                             → Verifying   (if sha256 present)
- *                             → Unpacking
- *                             → Ready | Failed
+ *   → NotInstalled/Failed?  → Queued → Downloading → Verifying? → Unpacking → Ready | Failed
  * ```
+ *
+ * ## Provisioning flow — SINGLE_FILE models
+ *
+ * ```
+ * ensureInstalled(id)
+ *   → already Ready?        → return (no-op)
+ *   → NotInstalled/Failed?  → Queued → Downloading → Verifying? → Ready | Failed
+ * ```
+ * (No Unpacking step — the downloaded file is moved directly to the install location.)
  *
  * ## Known limitations (first iteration)
  *
- * - Downloads are **not resumable**. A mid-download process kill discards the partial archive;
+ * - Downloads are **not resumable**. A mid-download process kill discards the partial file;
  *   the next [ensureInstalled] call restarts from scratch.
  * - No [androidx.work.WorkManager] scheduling. Provisioning runs in [scope] and is cancelled
  *   when the scope is cancelled (typically the ViewModel lifecycle). The download will restart
@@ -128,7 +132,6 @@ class DefaultLocalModelManager(
             stateFlow.value = ModelInstallState.Queued
 
             val tempFile = File(filesDir, "${descriptor.id}.download.tmp")
-            val installDir = File(filesDir, descriptor.installDirName)
 
             // 1. Download
             withContext(ioDispatcher) {
@@ -156,11 +159,21 @@ class DefaultLocalModelManager(
                 if (!checksumOk) return
             }
 
-            // 3. Unpack
-            stateFlow.value = ModelInstallState.Unpacking
-            withContext(ioDispatcher) {
-                extractArchive(tempFile, installDir, descriptor.archiveRootDir)
-                tempFile.delete()
+            // 3. Install
+            when (descriptor.archiveFormat) {
+                ModelArchiveFormat.ZIP -> {
+                    val installDir = File(filesDir, descriptor.installDirName)
+                    stateFlow.value = ModelInstallState.Unpacking
+                    withContext(ioDispatcher) {
+                        extractArchive(tempFile, installDir, descriptor.archiveRootDir)
+                        tempFile.delete()
+                    }
+                }
+                ModelArchiveFormat.SINGLE_FILE -> {
+                    withContext(ioDispatcher) {
+                        installSingleFile(tempFile, descriptor)
+                    }
+                }
             }
 
             // 4. Verify install
@@ -168,8 +181,8 @@ class DefaultLocalModelManager(
                 ModelInstallState.Ready
             } else {
                 ModelInstallState.Failed(
-                    reason = "Extraction completed but expected model files were not found in " +
-                        installDir.absolutePath,
+                    reason = "Install completed but expected model files were not found in " +
+                        File(filesDir, descriptor.installDirName).absolutePath,
                 )
             }
         } catch (e: Exception) {
@@ -293,21 +306,41 @@ class DefaultLocalModelManager(
     }
 
     /**
+     * Installs a [ModelArchiveFormat.SINGLE_FILE] model by creating the [installDirName]
+     * directory and moving [tempFile] to `installDirName/singleFileName`.
+     *
+     * Any pre-existing file at the destination is removed before the rename to ensure a clean
+     * install. The [tempFile] is consumed (deleted) by this call.
+     */
+    internal fun installSingleFile(tempFile: File, descriptor: LocalModelDescriptor) {
+        val installDir = File(filesDir, descriptor.installDirName)
+        installDir.mkdirs()
+        val destFile = File(installDir, descriptor.singleFileName)
+        if (destFile.exists()) destFile.delete()
+        tempFile.renameTo(destFile)
+    }
+
+    /**
      * Returns `true` if the model appears to be correctly installed on disk.
      *
-     * For [ModelType.STT] Vosk models this checks for the `am/final.mdl` acoustic model file
-     * (or a flat `final.mdl` for single-file layouts). For [ModelType.LLM] models the check
-     * is that the directory exists and is non-empty; individual model families can tighten this
-     * heuristic as needed.
+     * For [ModelArchiveFormat.SINGLE_FILE] models the check is that the named binary file exists
+     * inside [LocalModelDescriptor.installDirName]. For [ModelArchiveFormat.ZIP] models:
+     * - [ModelType.STT] Vosk models check for the `am/final.mdl` acoustic model file (or a flat
+     *   `final.mdl` for single-file layouts).
+     * - [ModelType.LLM] models check that the directory exists and is non-empty.
      */
     internal fun isInstalledOnDisk(descriptor: LocalModelDescriptor): Boolean {
         val dir = File(filesDir, descriptor.installDirName)
         if (!dir.exists() || !dir.isDirectory) return false
-        return when (descriptor.type) {
-            ModelType.STT ->
-                File(dir, "am/final.mdl").exists() || File(dir, "final.mdl").exists()
-            ModelType.LLM ->
-                dir.listFiles()?.isNotEmpty() == true
+        return when (descriptor.archiveFormat) {
+            ModelArchiveFormat.SINGLE_FILE ->
+                File(dir, descriptor.singleFileName).let { it.exists() && it.isFile }
+            ModelArchiveFormat.ZIP -> when (descriptor.type) {
+                ModelType.STT ->
+                    File(dir, "am/final.mdl").exists() || File(dir, "final.mdl").exists()
+                ModelType.LLM ->
+                    dir.listFiles()?.isNotEmpty() == true
+            }
         }
     }
 

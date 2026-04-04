@@ -369,9 +369,17 @@ class SpeechCoachSessionManager(
                 launch {
                     localTranscriber.activeBackend.collect { backend ->
                         _liveState.update { current ->
+                            val isChunk = backend == TranscriptionBackend.WhisperCpp
+                            // Reconfigure the WPM calculator when the backend changes.
+                            // Reset is safe here — a backend change means a new session context anyway.
+                            if (transcriptWpmCalculator.chunkBased != isChunk) {
+                                transcriptWpmCalculator.reset()
+                                transcriptWpmCalculator.setChunkBased(isChunk)
+                            }
                             current.copy(
                                 transcriptDebug = current.transcriptDebug.copy(
-                                    activeBackend = backend
+                                    activeBackend = backend,
+                                    isChunkBased = isChunk,
                                 )
                             )
                         }
@@ -462,7 +470,9 @@ class SpeechCoachSessionManager(
                                 rollingWpm = snapshot.rollingWpm.toFloat(),
                                 wpmPendingFinalRecognition = snapshot.partialTranscriptPresent &&
                                     snapshot.finalizedWordCount == 0,
-                                lastUpdateAtMs = update.receivedAtMs
+                                lastUpdateAtMs = update.receivedAtMs,
+                                isChunkBased = snapshot.isChunkBased,
+                                lastChunkAtMs = snapshot.lastChunkAtMs,
                             )
                         )
                     }

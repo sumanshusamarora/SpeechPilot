@@ -5,6 +5,13 @@ import com.speechpilot.transcription.TranscriptionEngineStatus
 
 /**
  * Typed transcript diagnostics exposed for UI/debug visibility.
+ *
+ * @param isChunkBased `true` when the active backend produces chunk-based (non-streaming)
+ *   updates rather than continuous partial + final results. Currently `true` for the Whisper.cpp
+ *   backend, `false` for Vosk and Android SpeechRecognizer. The UI uses this flag to show
+ *   appropriate language (e.g. "Whisper processing…" rather than "Listening…").
+ * @param lastChunkAtMs Timestamp of the last received transcript update. Combined with
+ *   [isChunkBased], the UI can show a staleness hint when no update has arrived for a while.
  */
 data class TranscriptDebugState(
     val debugEnabled: Boolean = false,
@@ -17,7 +24,9 @@ data class TranscriptDebugState(
     val rollingWordCount: Int = 0,
     val rollingWpm: Float = 0f,
     val wpmPendingFinalRecognition: Boolean = false,
-    val lastUpdateAtMs: Long? = null
+    val lastUpdateAtMs: Long? = null,
+    val isChunkBased: Boolean = false,
+    val lastChunkAtMs: Long? = null,
 )
 
 enum class TranscriptDebugStatus {

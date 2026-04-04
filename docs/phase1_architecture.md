@@ -148,33 +148,44 @@ Optional local-first transcript path exposed directly in live UX when enabled.
 
 #### Backend architecture
 
-The transcription module uses a **two-tier backend strategy**:
+The transcription module uses a **two-tier backend strategy** with a selectable primary STT backend:
 
 | Class | Role |
 |---|---|
-| `VoskLocalTranscriber` | **Preferred** dedicated backend. On-device STT using Vosk. Deterministic, no cloud dependency. Requires model assets. |
-| `AndroidSpeechRecognizerTranscriber` | **Fallback** backend. Android `SpeechRecognizer` API, offline-preferred best effort. Activated automatically when Vosk model is absent. |
-| `RoutingLocalTranscriber` | **Router**. Tries the Vosk backend first; falls back to `AndroidSpeechRecognizerTranscriber` if Vosk reports `ModelUnavailable`. Exposes `activeBackend` so the rest of the app can observe which path is running. |
-| `NoOpLocalTranscriber` | Disabled state (transcript debug mode off). |
+| `VoskLocalTranscriber` | **Default primary** backend. On-device STT using Vosk. Deterministic, no cloud dependency. Requires Vosk model assets. Reports `DedicatedLocalStt`. |
+| `WhisperCppLocalTranscriber` | **Alternative primary** backend. On-device STT using Whisper.cpp JNI. Better transcript quality for accented English. Chunk-based, Final-only updates. Reports `WhisperCpp`. |
+| `AndroidSpeechRecognizerTranscriber` | **Fallback** backend. Android `SpeechRecognizer` API, offline-preferred best effort. Activated automatically when the primary backend reports `ModelUnavailable`. |
+| `RoutingLocalTranscriber` | **Router**. Tries the configured primary backend first; falls back to `AndroidSpeechRecognizerTranscriber` if it reports `ModelUnavailable`. Exposes `activeBackend`. |
+| `NoOpLocalTranscriber` | Disabled state (transcription off). |
 
-`LocalTranscriber.activeBackend: StateFlow<TranscriptionBackend>` exposes which backend is live (`DedicatedLocalStt`, `AndroidSpeechRecognizer`, or `None`).
+`LocalTranscriber.activeBackend: StateFlow<TranscriptionBackend>` exposes which backend is live:
+- `DedicatedLocalStt` — Vosk is active
+- `WhisperCpp` — Whisper.cpp is active
+- `AndroidSpeechRecognizer` — Android fallback is active
+- `None` — not started or transcription disabled
 
-#### Backend selection (performed by `RoutingLocalTranscriber` at session start)
+#### Backend selection
 
-1. Start `VoskLocalTranscriber`.
-2. If it reports `TranscriptionEngineStatus.ModelUnavailable` (model files not present), stop it and start `AndroidSpeechRecognizerTranscriber`.
+**Primary selection** is controlled by `UserPreferences.preferWhisperBackend` (default: `false`):
+- `false` → `VoskLocalTranscriber` is created as the primary backend
+- `true` → `WhisperCppLocalTranscriber` is created as the primary backend
+
+**Fallback selection** is automatic (performed by `RoutingLocalTranscriber` at session start):
+
+1. Start the selected primary backend.
+2. If it reports `TranscriptionEngineStatus.ModelUnavailable`, stop it and start `AndroidSpeechRecognizerTranscriber`.
 3. Route `updates` and `status` flows from the selected backend.
 4. Update `activeBackend` to reflect the selected path.
 
 #### Engine statuses
 
-`TranscriptionEngineStatus` has been extended to cover the full lifecycle of both backends:
+`TranscriptionEngineStatus` covers the full lifecycle of all backends:
 
 | Status | Meaning |
 |---|---|
 | `Disabled` | Not running |
-| `InitializingModel` | Vosk backend loading model |
-| `ModelUnavailable` | Vosk model assets not found on device |
+| `InitializingModel` | Backend loading model |
+| `ModelUnavailable` | Model assets not found (Vosk) or model file / native library absent (Whisper) |
 | `Listening` | Engine active and listening |
 | `Restarting` | Auto-restart at result boundary (SpeechRecognizer) |
 | `Unavailable` | Device/service does not provide recognition |
@@ -182,23 +193,42 @@ The transcription module uses a **two-tier backend strategy**:
 
 #### Runtime behaviour and constraints
 
-- `VoskLocalTranscriber` is the fully implemented primary backend. It uses the shared app audio
-  frame stream (from `MicrophoneCapture` via `setAudioSource`) — it does **not** open a second
-  `AudioRecord`. Vosk's `Model` and `Recognizer` are initialized on the IO dispatcher and
-  released in the `finally` block on every exit path (stop, error, cancellation).
+- `VoskLocalTranscriber` uses the shared app audio frame stream via `setAudioSource` — it does
+  **not** open a second `AudioRecord`. Emits streaming partial + final results.
+- `WhisperCppLocalTranscriber` also uses the shared audio frame stream. It **buffers PCM frames**
+  internally in 5-second chunks before running inference. It emits **Final-only** updates — there
+  are no streaming partial results. This is intentional: Whisper is a chunk-based encoder-decoder.
+- Whisper's native runtime (`libwhisper_jni.so`) is built automatically by CMake `FetchContent` during
+  `./gradlew assembleDebug`. whisper.cpp v1.7.2 is fetched from GitHub on first build (requires network);
+  subsequent builds use the CMake cache. NDK `26.3.11579264` is pinned. ABIs: `arm64-v8a`, `x86_64`.
+  If the library fails to load at runtime, `WhisperNative.isAvailable = false` → `ModelUnavailable` →
+  automatic fallback to Android SR.
 - The Vosk AAR (`com.alphacephei:vosk-android:0.3.47`) and JNA companion
   (`net.java.dev.jna:jna:5.13.0`) are wired in `transcription/build.gradle.kts`.
-- Until model assets are present, `VoskLocalTranscriber` reports `ModelUnavailable` immediately
-  after `start()` and `RoutingLocalTranscriber` activates `AndroidSpeechRecognizerTranscriber`.
 - `AndroidSpeechRecognizerTranscriber` behavior (quality, offline availability, latency) varies
-  by device and speech service provider — this is the fundamental reason Vosk is preferred.
-- Vosk result JSON is parsed with a lightweight regex: final results read `"text"`, partial
-  results read `"partial"`. Raw JSON is never passed through as transcript text.
+  by device and speech service provider — this is the fundamental reason a dedicated backend is preferred.
+
+#### Chunk-based WPM hold (Whisper)
+
+`RollingTranscriptWpmCalculator` supports a **chunk-based mode** (`chunkBased = true`) enabled
+automatically when the active backend is `TranscriptionBackend.WhisperCpp`.
+
+Without smoothing, Whisper's 5-second chunk boundary causes the rolling WPM to fluctuate as
+word observations age out of the 30-second window. The hold strategy:
+
+- After each Final update the last computed WPM is stored as `heldWpm`
+- Between chunks (while `timeSinceLastChunk ≤ wpmHoldDurationMs`, default 10 s), if the live
+  rolling WPM drops below `heldWpm`, the held value is returned instead
+- If the hold expires or the live WPM overtakes the held value, live WPM resumes
+
+`TranscriptDebugState.isChunkBased` and `lastChunkAtMs` expose this to the UI so it can
+display "Whisper processing…" rather than appearing to stall.
 
 #### Other transcript components
 
-- `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only.
-- `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, and pending flags.
+- `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only. Supports `chunkBased` mode with WPM hold for Whisper backends.
+- `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, pending flags, `isChunkBased`, and `lastChunkAtMs`.
+- `WhisperRunner` interface (with `WhisperNativeRunner` production and `FakeWhisperRunner` test implementations) abstracts native JNI calls for testability.
 
 **Current behavior:** transcript-derived WPM is the **primary displayed pace metric** in transcript mode when finalized words exist, and becomes the **feedback decision signal** once transcript readiness is reached.
 
@@ -220,31 +250,46 @@ network transmission occurs.
 DataStore-backed user preferences. `DataStoreAppSettings` is the concrete implementation of
 `AppSettings`, reading from and writing to `DataStore<Preferences>` under the key
 `user_preferences`. Persists: `targetWpm`, `tolerancePct`, `feedbackCooldownMs`,
-`micSampleRate`, `transcriptionEnabled`. All data is local-only.
+`micSampleRate`, `transcriptionEnabled`, `preferWhisperBackend`. All data is local-only.
 
 `transcriptionEnabled` defaults to `true` — transcription is a first-class feature, on by default.
-Users can turn it off in Settings → Transcription if not needed.
+`preferWhisperBackend` defaults to `false` — Vosk is the default primary STT backend.
+Users can change both in Settings.
 
 Settings are observed continuously by `MainViewModel`.
-For active sessions, preference changes (including transcription enablement) apply from the next session start to avoid disrupting the running pipeline.
+For active sessions, preference changes (including transcription enablement and backend selection) apply from the next session start to avoid disrupting the running pipeline.
 
 ### `modelmanager`
 
 Generic infrastructure for managing on-device AI model lifecycle. Responsible for downloading,
-extracting, and verifying local model assets so they are available to the relevant backend (e.g.
-Vosk STT, and future Gemma LLM models). No cloud inference or server-side processing — models
-are provisioned to the device's private files directory and used entirely locally.
+installing, and verifying local model assets so they are available to the relevant backend (e.g.
+Vosk STT, Whisper.cpp STT, and future Gemma LLM models). No cloud inference or server-side
+processing — models are provisioned to the device's private files directory and used entirely locally.
+
+Supports two packaging formats:
+- **ZIP** (`ModelArchiveFormat.ZIP`): downloaded archive is extracted, root prefix stripped, contents placed in `installDirName`.
+- **SINGLE_FILE** (`ModelArchiveFormat.SINGLE_FILE`): single binary is downloaded and placed at `installDirName/singleFileName` with no extraction step. Used for Whisper ggml models.
 
 #### Core types
 
 | Type | Role |
 |---|---|
 | `ModelType` | Enum: `STT` (speech-to-text), `LLM` (large language model) |
-| `LocalModelDescriptor` | Immutable description of a model: id, type, purpose, download URL, install path, archive root dir, version, optional SHA-256 |
-| `ModelInstallState` | Sealed class lifecycle: `NotInstalled` → `Queued` → `Downloading(progress)` → `Unpacking` → `Verifying` → `Ready` / `Failed(reason)` |
+| `ModelArchiveFormat` | Enum: `ZIP` (archive extraction) or `SINGLE_FILE` (direct binary placement) |
+| `LocalModelDescriptor` | Immutable description of a model: id, type, displayName, approxSizeMb, wifiRecommended, purpose, download URL, install path, archive format, single filename, version, optional SHA-256 |
+| `ModelInstallState` | Sealed class lifecycle: `NotInstalled` → `Queued` → `Downloading(progress)` → `Unpacking`? → `Verifying`? → `Ready` / `Failed(reason)` |
 | `LocalModelManager` | Interface: `stateOf()`, `isReady()`, `ensureInstalled()`, `retry()` |
-| `DefaultLocalModelManager` | Concrete implementation. Downloads via `HttpURLConnection`, extracts via `ZipInputStream` with atomic staging rename, updates `StateFlow` throughout |
+| `WorkManagerLocalModelManager` | Production implementation. Schedules `ModelDownloadWorker` via WorkManager; maps `WorkInfo` progress → `StateFlow<ModelInstallState>`; survives app backgrounding |
+| `ModelDownloadWorker` | `CoroutineWorker`. Downloads via `HttpURLConnection`; extracts ZIP or places single file; reports progress via `setProgress()`; outputs error message on failure |
+| `DefaultLocalModelManager` | Coroutine-scope-based implementation used in unit tests (no WorkManager dependency) |
 | `KnownModels` | Registry of predefined model descriptors |
+
+#### Registered models
+
+| Model ID | Type | Format | Description | Size | Wi-Fi |
+|---|---|---|---|---|---|
+| `vosk-model-small-en-us` | STT | ZIP | Vosk small English model | ~40 MB | Not required |
+| `whisper-ggml-small` | STT | SINGLE_FILE | Whisper.cpp ggml-small model | ~466 MB | Recommended |
 
 #### Storage layout
 
@@ -252,11 +297,13 @@ All model assets are installed into the app's private files directory (`Context.
 
 ```
 filesDir/
-  vosk-model-small-en-us/         ← Vosk STT model (auto-provisioned)
+  vosk-model-small-en-us/         ← Vosk STT model (auto-provisioned, ZIP)
     am/final.mdl                   ← acoustic model (readiness marker)
     conf/
     graph/
     …
+  whisper/                         ← Whisper STT model directory (auto-provisioned, SINGLE_FILE)
+    ggml-small.bin                 ← ggml model binary (readiness marker)
   gemma-4-e2b/                    ← future Gemma LLM model (not yet implemented)
 ```
 
@@ -264,30 +311,41 @@ Partial downloads are kept as `<model-id>.download.tmp` and deleted on failure o
 
 #### Provisioning flow
 
-1. `DefaultLocalModelManager` checks at init whether each registered model is already on disk.
-   If `am/final.mdl` (or flat `final.mdl` for STT models) is present, state starts as `Ready`.
-2. When `ensureInstalled(modelId)` is called (e.g. at ViewModel init when transcription is
-   enabled), provisioning is scheduled if the model is not already `Ready`.
-3. Download streams to a temp file with byte-level progress updates.
-4. Optional SHA-256 checksum verification.
-5. Archive is extracted to a staging directory; root prefix (e.g. `vosk-model-small-en-us-0.22/`)
-   is stripped so files land directly in the final install directory.
-6. Staging directory is atomically renamed to the final install path.
-7. State becomes `Ready` (or `Failed` if post-extraction readiness check fails).
+**ZIP models (Vosk) via WorkManager:**
+1. `ensureInstalled(id)` enqueues `ModelDownloadWorker` via WorkManager (unique work, REPLACE policy)
+2. WorkManager waits for network connectivity before starting
+3. Worker downloads to temp file; posts percent/byte progress via `setProgress()`
+4. Optional SHA-256 verification
+5. ZIP extraction to staging directory; strip root prefix; atomic rename to install path
+6. `ModelDownloadWorker` returns `Result.success()` → observer maps to `ModelInstallState.Ready`
+
+**SINGLE_FILE models (Whisper) via WorkManager:**
+1–4. Same as above
+5. Create install directory; move temp file directly → no `Unpacking` step
+6. `ModelDownloadWorker` returns `Result.success()` → `Ready`
+
+WorkManager ensures the download survives backgrounding. If the process is killed mid-download,
+WorkManager restarts the worker automatically when the app returns and network is available
+(note: partial downloads are not resumable; the temp file is deleted and the download restarts).
+
+**Active-backend-only provisioning:**
+`MainViewModel` calls `ensureInstalled()` only for the model required by the currently selected backend:
+- Vosk selected → provision `vosk-model-small-en-us` only
+- Whisper selected → provision `whisper-ggml-small` only
+- Transcription disabled → no provisioning
+
+The inactive backend's model is never eagerly downloaded. Backend switching triggers a new `ensureInstalled()` call for the newly selected backend's model.
 
 #### Extending for future models (e.g. Gemma 4 E2B)
 
 Add a new `LocalModelDescriptor` to `KnownModels.all`. The provisioning infrastructure
-requires no changes. Extend `isInstalledOnDisk` in `DefaultLocalModelManager` with a
-`ModelType.LLM`-specific readiness heuristic if the current non-empty-directory check is
-insufficient.
+requires no changes. For ZIP models, extend `isInstalledOnDisk` with a `ModelType.LLM`-specific
+readiness heuristic if the current non-empty-directory check is insufficient.
 
 #### Known limitations
 
-- Downloads are not resumable across process restarts.
-- No background scheduling (WorkManager). Provisioning is tied to `viewModelScope` lifetime.
-- No automatic retry on network failure — user must press Retry in the UI.
-- No WiFi-only gating or download size warnings.
+- Downloads are not resumable across process restarts (partial temp file is deleted; download restarts from zero).
+- No automatic retry on transient network failure — user must press Retry in the UI.
 
 ---
 

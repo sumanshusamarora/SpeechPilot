@@ -28,8 +28,8 @@ SpeechPilot is structured as a multi-module Android project. Each module has a s
 | `feedback` | Decisioning and feedback events |
 | `data` | Persistence (Room, repositories) |
 | `settings` | User configuration (DataStore) |
-| `transcription` | Local transcription — Vosk preferred backend, Android SR fallback, rolling transcript WPM |
-| `modelmanager` | Generic on-device model provisioning — download, install, state tracking for Vosk and future models |
+| `transcription` | Local transcription — Vosk or Whisper.cpp primary backend, Android SR fallback, rolling transcript WPM |
+| `modelmanager` | Generic on-device model provisioning — download, install, state tracking for Vosk, Whisper, and future models |
 
 See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full architecture description.
 
@@ -106,45 +106,86 @@ Transcription can be disabled in **Settings → Transcription** if not needed.
 
 #### Transcription backend strategy
 
-The app uses a **two-tier backend architecture**:
+The app uses a **two-tier backend architecture** with selectable primary STT backends:
 
 | Backend | Role | Condition |
 |---|---|---|
-| **Vosk** (`VoskLocalTranscriber`) | **Preferred** — deterministic on-device STT, no cloud dependency | Active when model assets are installed |
-| **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when Vosk model is absent or still provisioning |
+| **Vosk** (`VoskLocalTranscriber`) | Primary dedicated STT (default) — deterministic on-device, no cloud | Active when Vosk is selected and model assets are installed |
+| **Whisper.cpp** (`WhisperCppLocalTranscriber`) | Alternative primary STT — better for accented English (e.g. Indian English) | Active when Whisper is selected and model + native library are present |
+| **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when the selected primary backend is unavailable |
 | **No-op** (`NoOpLocalTranscriber`) | Transcription disabled | Settings → Transcription turned off |
 
+**Backend selection:** The primary STT backend is selectable in **Settings → Use Whisper.cpp backend**:
+- **Off (default):** Vosk is the primary backend
+- **On:** Whisper.cpp is the primary backend
+
 Selection is performed automatically by `RoutingLocalTranscriber` at session start:
-1. Attempt to start the Vosk backend
+1. Start the selected primary backend (Vosk or Whisper.cpp)
 2. If it reports `ModelUnavailable`, stop it and activate the Android SpeechRecognizer fallback
 3. Expose the active backend in `TranscriptDebugState.activeBackend`
 
 The active backend is visible in the debug panel as **Transcript backend**.
 
-#### Automatic Vosk model provisioning
+#### Vosk backend (default)
 
-**No manual setup is required.** When transcription is enabled (the default), the app automatically
-downloads and installs the Vosk speech model on first launch.
+- Model: `vosk-model-small-en-us` (~40 MB compressed)
+- Streaming frame-by-frame recognition with partial and final results
+- Low latency, deterministic offline
 
-The model (`vosk-model-small-en-us-0.22`, ~40 MB) is downloaded from
-https://alphacephei.com/vosk/models and installed to `filesDir/vosk-model-small-en-us`. A
-**Speech Model** status card on the main screen shows download progress and the current install
-state. Once installation completes, the card disappears and Vosk becomes the active backend.
+#### Whisper.cpp backend
 
-If the download fails, the card shows the failure reason and a **Retry Download** button.
-While the model is being provisioned, the Android SpeechRecognizer fallback is used automatically.
+- Model: `ggml-small.bin` (~466 MB)
+- Default URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
+- Chunk-based inference: audio is buffered in 5-second windows before running inference
+- **Final-only updates** — no streaming partial results (inherent to Whisper's design)
+- May produce better transcript quality for accented English
+- Native runtime is compiled automatically by CMake's `FetchContent` on first build — no manual step required
 
-Model install states: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Ready` / `Failed`
+##### Whisper native runtime (CMake + JNI)
+
+The native library is now **built automatically** as part of a normal `./gradlew assembleDebug` build.
+
+How it works:
+1. The `transcription` module declares an `externalNativeBuild` pointing to `transcription/src/main/cpp/CMakeLists.txt`
+2. The `CMakeLists.txt` uses CMake's `FetchContent` to download whisper.cpp (v1.7.2) from GitHub during the first CMake configure
+3. CMake builds `libwhisper_jni.so` (the JNI bridge) and statically links `libwhisper` into it
+4. The resulting `.so` is packaged into the APK for `arm64-v8a` and `x86_64`
+
+On first build, CMake needs network access to clone the whisper.cpp repository (~100 MB). Subsequent builds use the CMake fetch cache and are fully offline. NDK version `26.3.11579264` is pinned for reproducibility.
+
+If the native library fails to load at runtime (unsupported device, corrupted install), `WhisperNative.isAvailable` is `false` and the backend reports `ModelUnavailable` → Android SR fallback activates automatically.
+
+#### Automatic model provisioning (WorkManager-backed)
+
+**No manual setup is required.** The app automatically downloads the model required by the active STT backend. Downloads are managed by **WorkManager** so they survive app backgrounding.
+
+- **Vosk selected** → provisions Vosk model only (~40 MB, no Wi-Fi required)
+- **Whisper selected** → provisions Whisper model only (~466 MB, Wi-Fi recommended)
+- **Android SR** or transcription disabled → no model download
+
+A status card on the main screen shows:
+- Model display name and approximate download size
+- Wi-Fi recommendation for large models
+- Live download progress (percent + MB)
+- Retry button on failure
+
+Model install states:
+- Vosk: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Ready` / `Failed`
+- Whisper: `NotInstalled` → `Queued` → `Downloading` → `Ready` / `Failed` *(no unzip needed)*
+
+WorkManager ensures the download continues even if the user backgrounds the app. Network connectivity is required (WorkManager will wait for a connected network before starting).
 
 #### Local model storage layout
 
 ```
 filesDir/
-  vosk-model-small-en-us/       ← Vosk STT model (auto-provisioned)
+  vosk-model-small-en-us/       ← Vosk STT model (auto-provisioned, ~40 MB)
     am/final.mdl                 ← acoustic model (readiness marker)
     conf/
     graph/
     …
+  whisper/                       ← Whisper.cpp model directory (auto-provisioned, ~466 MB)
+    ggml-small.bin               ← ggml model binary (readiness marker)
 ```
 
 #### What transcription provides
@@ -153,6 +194,7 @@ filesDir/
 - Rolling **transcript-derived WPM** from finalized recognized words (primary pace signal when available)
 - Explicit status states: listening, partial transcript, final transcript, model unavailable, error
 - Heuristic est-WPM as secondary fallback when transcript is pending or unavailable
+- **Chunk-based mode** (Whisper): WPM hold carries the last known pace for up to 10 seconds between chunks to avoid oscillation
 
 > Transcription setting changes apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
@@ -164,28 +206,30 @@ filesDir/
 ### Local model management
 
 SpeechPilot uses a generic model provisioning system (`modelmanager` module) to automatically
-manage on-device AI model assets. The system is not Vosk-specific — it is designed to support
+manage on-device AI model assets. The system is not backend-specific — it supports both zip
+archive models (Vosk) and single-file binary models (Whisper.cpp), and is designed to support
 additional model families in future iterations (e.g. Gemma 4 E2B on-device LLM).
 
 Key abstractions:
 
 | Class | Role |
 |---|---|
-| `LocalModelDescriptor` | Model metadata: id, type, download URL, install path, version, optional checksum |
-| `ModelInstallState` | Observable state machine: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Verifying` → `Ready` / `Failed` |
+| `LocalModelDescriptor` | Model metadata: id, type, displayName, approxSizeMb, wifiRecommended, download URL, install path, archive format, version, optional checksum |
+| `ModelArchiveFormat` | `ZIP` (extract archive) or `SINGLE_FILE` (download binary directly) |
+| `ModelInstallState` | Observable state machine: `NotInstalled` → `Queued` → `Downloading` → `Unpacking`? → `Verifying`? → `Ready` / `Failed` |
 | `LocalModelManager` | Interface: `ensureInstalled()`, `stateOf()`, `isReady()`, `retry()` |
-| `DefaultLocalModelManager` | Concrete implementation: `HttpURLConnection` download, `ZipInputStream` extract, atomic staging rename |
+| `WorkManagerLocalModelManager` | Production implementation: schedules `ModelDownloadWorker` via WorkManager; maps `WorkInfo` → `StateFlow<ModelInstallState>` |
+| `ModelDownloadWorker` | `CoroutineWorker`: downloads model (HTTP), optional SHA-256 verify, ZIP extract or single-file install, reports progress via `setProgress()` |
+| `DefaultLocalModelManager` | Coroutine-scope-based implementation; used in unit tests without WorkManager dependency |
 | `KnownModels` | Predefined model registry — add new models here |
 
 Adding a new model (e.g. Gemma 4 E2B) requires only adding a `LocalModelDescriptor` to
 `KnownModels.all` and calling `ensureInstalled()` from the appropriate ViewModel — no changes
 to provisioning logic.
 
-**Known limitations (first iteration):**
-- Downloads are not resumable across process restarts
-- No WorkManager background scheduling — provisioning is tied to ViewModel scope
-- No automatic retry; user must press Retry on failure
-- No WiFi-only gating or download size warnings
+**Current limitations:**
+- Downloads are not resumable across process restarts (partial files are discarded; next call restarts from zero)
+- No automatic retry on transient network failure; user must press Retry on failure
 
 ---
 

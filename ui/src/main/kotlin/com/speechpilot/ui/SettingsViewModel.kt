@@ -44,4 +44,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             appSettings.update(preferences.value.copy(transcriptionEnabled = enabled))
         }
     }
+
+    fun updatePreferWhisperBackend(prefer: Boolean) {
+        viewModelScope.launch {
+            appSettings.update(preferences.value.copy(preferWhisperBackend = prefer))
+        }
+    }
 }
