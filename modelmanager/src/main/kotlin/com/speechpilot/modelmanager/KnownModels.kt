@@ -20,10 +20,10 @@ object KnownModels {
         id = "vosk-model-small-en-us",
         type = ModelType.STT,
         purpose = "On-device English speech recognition (Vosk)",
-        downloadUrl = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.22.zip",
+        downloadUrl = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
         installDirName = "vosk-model-small-en-us",
-        archiveRootDir = "vosk-model-small-en-us-0.22",
-        version = "0.22",
+        archiveRootDir = "vosk-model-small-en-us-0.15",
+        version = "0.15",
     )
 
     // Future: Gemma 4 E2B (LLM) — uncomment and fill in when implementing Gemma support.
