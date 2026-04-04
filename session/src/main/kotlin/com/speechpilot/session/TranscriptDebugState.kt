@@ -1,5 +1,6 @@
 package com.speechpilot.session
 
+import com.speechpilot.transcription.TranscriptionBackend
 import com.speechpilot.transcription.TranscriptionEngineStatus
 
 /**
@@ -9,6 +10,7 @@ data class TranscriptDebugState(
     val debugEnabled: Boolean = false,
     val status: TranscriptDebugStatus = TranscriptDebugStatus.Disabled,
     val engineStatus: TranscriptionEngineStatus = TranscriptionEngineStatus.Disabled,
+    val activeBackend: TranscriptionBackend = TranscriptionBackend.None,
     val transcriptText: String = "",
     val partialTranscriptPresent: Boolean = false,
     val finalizedWordCount: Int = 0,
@@ -24,6 +26,7 @@ enum class TranscriptDebugStatus {
     WaitingForSpeech,
     PartialAvailable,
     FinalAvailable,
+    ModelUnavailable,
     Unavailable,
     Error
 }
@@ -38,8 +41,10 @@ internal fun resolveTranscriptDebugStatus(
     if (!debugEnabled) return TranscriptDebugStatus.Disabled
     return when (engineStatus) {
         TranscriptionEngineStatus.Unavailable -> TranscriptDebugStatus.Unavailable
+        TranscriptionEngineStatus.ModelUnavailable -> TranscriptDebugStatus.ModelUnavailable
         TranscriptionEngineStatus.Error -> TranscriptDebugStatus.Error
         TranscriptionEngineStatus.Disabled -> TranscriptDebugStatus.Disabled
+        TranscriptionEngineStatus.InitializingModel -> TranscriptDebugStatus.Listening
         TranscriptionEngineStatus.Restarting -> {
             if (finalizedWordCount > 0) TranscriptDebugStatus.FinalAvailable
             else if (partialTranscriptPresent) TranscriptDebugStatus.PartialAvailable

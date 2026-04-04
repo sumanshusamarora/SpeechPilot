@@ -15,6 +15,8 @@ import com.speechpilot.settings.DataStoreAppSettings
 import com.speechpilot.settings.UserPreferences
 import com.speechpilot.transcription.AndroidSpeechRecognizerTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
+import com.speechpilot.transcription.RoutingLocalTranscriber
+import com.speechpilot.transcription.VoskLocalTranscriber
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +42,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             appSettings.preferences.collect { prefs ->
                 latestPreferences = prefs
-                _uiState.update { it.copy(transcriptDebugEnabled = prefs.localTranscriptDebugEnabled) }
+                _uiState.update { it.copy(transcriptionEnabled = prefs.transcriptionEnabled) }
                 val isSessionActive = sessionManager?.liveState?.value?.sessionState == SessionState.Active
                 if (!isSessionActive) {
                     recreateSessionManager(prefs)
@@ -53,8 +55,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         liveStateJob?.cancel()
         sessionManager?.release()
 
-        val transcriber = if (prefs.localTranscriptDebugEnabled) {
-            AndroidSpeechRecognizerTranscriber(getApplication())
+        val transcriber = if (prefs.transcriptionEnabled) {
+            RoutingLocalTranscriber(
+                primaryTranscriber = VoskLocalTranscriber.create(getApplication()),
+                fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
+            )
         } else {
             NoOpLocalTranscriber()
         }
@@ -68,7 +73,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 cooldownMs = prefs.feedbackCooldownMs
             ),
             localTranscriber = transcriber,
-            transcriptDebugEnabled = prefs.localTranscriptDebugEnabled
+            transcriptDebugEnabled = prefs.transcriptionEnabled
         )
         sessionManager = mgr
         startWatchingLiveState(mgr, isFileSession = false, fileSessionUri = null)
@@ -77,6 +82,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun recreateFileSessionManager(prefs: UserPreferences, uri: Uri) {
         liveStateJob?.cancel()
         sessionManager?.release()
+
+        val transcriber = if (prefs.transcriptionEnabled) {
+            RoutingLocalTranscriber(
+                primaryTranscriber = VoskLocalTranscriber.create(getApplication()),
+                fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
+            )
+        } else {
+            NoOpLocalTranscriber()
+        }
 
         val mgr = SpeechCoachSessionManager.createForFile(
             context = getApplication(),
@@ -88,7 +102,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 tolerancePct = prefs.tolerancePct.toDouble(),
                 cooldownMs = prefs.feedbackCooldownMs
             ),
-            transcriptDebugEnabled = prefs.localTranscriptDebugEnabled
+            localTranscriber = transcriber,
+            transcriptDebugEnabled = prefs.transcriptionEnabled
         )
         sessionManager = mgr
         startWatchingLiveState(mgr, isFileSession = true, fileSessionUri = uri.toString())

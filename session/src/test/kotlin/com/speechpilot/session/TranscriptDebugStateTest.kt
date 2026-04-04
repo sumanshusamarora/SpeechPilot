@@ -83,4 +83,43 @@ class TranscriptDebugStateTest {
 
         assertEquals(TranscriptDebugStatus.Error, status)
     }
+
+    @Test
+    fun `ModelUnavailable status when dedicated backend has no model`() {
+        val status = resolveTranscriptDebugStatus(
+            debugEnabled = true,
+            engineStatus = TranscriptionEngineStatus.ModelUnavailable,
+            isSessionListening = true,
+            partialTranscriptPresent = false,
+            finalizedWordCount = 0
+        )
+
+        assertEquals(TranscriptDebugStatus.ModelUnavailable, status)
+    }
+
+    @Test
+    fun `Listening status while dedicated backend initializes model`() {
+        val status = resolveTranscriptDebugStatus(
+            debugEnabled = true,
+            engineStatus = TranscriptionEngineStatus.InitializingModel,
+            isSessionListening = true,
+            partialTranscriptPresent = false,
+            finalizedWordCount = 0
+        )
+
+        assertEquals(TranscriptDebugStatus.Listening, status)
+    }
+
+    @Test
+    fun `ModelUnavailable status not triggered when debug mode off`() {
+        val status = resolveTranscriptDebugStatus(
+            debugEnabled = false,
+            engineStatus = TranscriptionEngineStatus.ModelUnavailable,
+            isSessionListening = true,
+            partialTranscriptPresent = false,
+            finalizedWordCount = 0
+        )
+
+        assertEquals(TranscriptDebugStatus.Disabled, status)
+    }
 }

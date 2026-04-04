@@ -6,12 +6,16 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Local transcription contract.
  *
- * Implementations may rely on device speech services. Callers should treat [status] as best-effort
- * runtime state and not assume hard offline guarantees across all devices.
+ * Implementations expose [activeBackend] so the rest of the app can observe which backend is
+ * actually running without depending on concrete types. The preferred backend is
+ * [TranscriptionBackend.DedicatedLocalStt] (Vosk); [TranscriptionBackend.AndroidSpeechRecognizer]
+ * is the fallback path.
  */
 interface LocalTranscriber {
     val updates: Flow<TranscriptUpdate>
     val status: StateFlow<TranscriptionEngineStatus>
+    /** Identifies which backend is currently active. Updated on [start] and [stop]. */
+    val activeBackend: StateFlow<TranscriptionBackend>
     suspend fun start()
     suspend fun stop()
 }

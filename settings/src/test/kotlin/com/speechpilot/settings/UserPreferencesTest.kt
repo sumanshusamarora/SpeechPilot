@@ -26,8 +26,8 @@ class UserPreferencesTest {
     }
 
     @Test
-    fun `default localTranscriptDebugEnabled is false`() {
-        assertEquals(false, UserPreferences().localTranscriptDebugEnabled)
+    fun `default transcriptionEnabled is true`() {
+        assertEquals(true, UserPreferences().transcriptionEnabled)
     }
 
     @Test
@@ -38,7 +38,7 @@ class UserPreferencesTest {
         assertEquals(base.tolerancePct, updated.tolerancePct, 0.001f)
         assertEquals(base.feedbackCooldownMs, updated.feedbackCooldownMs)
         assertEquals(base.micSampleRate, updated.micSampleRate)
-        assertEquals(base.localTranscriptDebugEnabled, updated.localTranscriptDebugEnabled)
+        assertEquals(base.transcriptionEnabled, updated.transcriptionEnabled)
     }
 
     @Test
@@ -56,12 +56,12 @@ class UserPreferencesTest {
             tolerancePct = 0.20f,
             feedbackCooldownMs = 8_000L,
             micSampleRate = 44_100,
-            localTranscriptDebugEnabled = true
+            transcriptionEnabled = false
         )
         assertEquals(150, prefs.targetWpm)
         assertEquals(0.20f, prefs.tolerancePct, 0.001f)
         assertEquals(8_000L, prefs.feedbackCooldownMs)
         assertEquals(44_100, prefs.micSampleRate)
-        assertEquals(true, prefs.localTranscriptDebugEnabled)
+        assertEquals(false, prefs.transcriptionEnabled)
     }
 }

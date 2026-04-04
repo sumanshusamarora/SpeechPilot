@@ -15,7 +15,7 @@ class LiveSessionPresentationTest {
     @Test
     fun `shows listening state when transcript enabled but no words yet`() {
         val state = MainUiState(
-            transcriptDebugEnabled = true,
+            transcriptionEnabled = true,
             transcriptDebug = TranscriptDebugState(
                 status = TranscriptDebugStatus.WaitingForSpeech,
                 engineStatus = TranscriptionEngineStatus.Listening
@@ -31,7 +31,7 @@ class LiveSessionPresentationTest {
     @Test
     fun `shows partial transcript when only partial text exists`() {
         val state = MainUiState(
-            transcriptDebugEnabled = true,
+            transcriptionEnabled = true,
             transcriptDebug = TranscriptDebugState(
                 status = TranscriptDebugStatus.PartialAvailable,
                 partialTranscriptPresent = true,
@@ -49,7 +49,7 @@ class LiveSessionPresentationTest {
     @Test
     fun `prefers transcript wpm as primary pace when finalized words exist`() {
         val state = MainUiState(
-            transcriptDebugEnabled = true,
+            transcriptionEnabled = true,
             debugInfo = DebugPipelineInfo(
                 activePaceSource = PaceSignalSource.Transcript,
                 decisionWpm = 120.0,
@@ -67,7 +67,7 @@ class LiveSessionPresentationTest {
     @Test
     fun `shows heuristic pace with transcript pending message when no final words yet`() {
         val state = MainUiState(
-            transcriptDebugEnabled = true,
+            transcriptionEnabled = true,
             debugInfo = DebugPipelineInfo(
                 activePaceSource = PaceSignalSource.Heuristic,
                 decisionWpm = 150.0,
@@ -85,7 +85,7 @@ class LiveSessionPresentationTest {
     @Test
     fun `shows transcript unavailable when recognizer unavailable`() {
         val state = MainUiState(
-            transcriptDebugEnabled = true,
+            transcriptionEnabled = true,
             debugInfo = DebugPipelineInfo(
                 activePaceSource = PaceSignalSource.Heuristic,
                 decisionWpm = 145.0,

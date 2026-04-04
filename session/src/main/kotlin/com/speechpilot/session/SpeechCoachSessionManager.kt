@@ -19,6 +19,7 @@ import com.speechpilot.segmentation.VadFrameClassification
 import com.speechpilot.transcription.LocalTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RollingTranscriptWpmCalculator
+import com.speechpilot.transcription.TranscriptionBackend
 import com.speechpilot.transcription.TranscriptionEngineStatus
 import com.speechpilot.vad.EnergyBasedVad
 import android.content.Context
@@ -103,6 +104,7 @@ class SpeechCoachSessionManager(
                             finalizedWordCount = 0
                         ),
                         engineStatus = localTranscriber.status.value,
+                        activeBackend = localTranscriber.activeBackend.value,
                         transcriptText = "",
                         partialTranscriptPresent = false,
                         finalizedWordCount = 0,
@@ -309,7 +311,7 @@ class SpeechCoachSessionManager(
             sessionRepository: SessionRepository? = null,
             feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
             localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
-            transcriptDebugEnabled: Boolean = false
+            transcriptDebugEnabled: Boolean = true
         ): SpeechCoachSessionManager = SpeechCoachSessionManager(
             feedbackDispatcher = feedbackDispatcher,
             sessionRepository = sessionRepository,
@@ -337,7 +339,7 @@ class SpeechCoachSessionManager(
             sessionRepository: SessionRepository? = null,
             feedbackDecision: FeedbackDecision = ThresholdFeedbackDecision(),
             localTranscriber: LocalTranscriber = NoOpLocalTranscriber(),
-            transcriptDebugEnabled: Boolean = false
+            transcriptDebugEnabled: Boolean = true
         ): SpeechCoachSessionManager = SpeechCoachSessionManager(
             audioCapture = FileAudioCapture(context, audioFileUri),
             feedbackDispatcher = feedbackDispatcher,
@@ -360,6 +362,17 @@ class SpeechCoachSessionManager(
         try {
             localTranscriber.start()
             transcriptionJob = managerScope.launch {
+                launch {
+                    localTranscriber.activeBackend.collect { backend ->
+                        _liveState.update { current ->
+                            current.copy(
+                                transcriptDebug = current.transcriptDebug.copy(
+                                    activeBackend = backend
+                                )
+                            )
+                        }
+                    }
+                }
                 launch {
                     localTranscriber.status.collect { status ->
                         _liveState.update { current ->

@@ -44,7 +44,7 @@ class DataStoreAppSettings(context: Context) : AppSettings {
                 tolerancePct = store[Keys.TOLERANCE_PCT] ?: defaults.tolerancePct,
                 feedbackCooldownMs = store[Keys.FEEDBACK_COOLDOWN_MS] ?: defaults.feedbackCooldownMs,
                 micSampleRate = store[Keys.MIC_SAMPLE_RATE] ?: defaults.micSampleRate,
-                localTranscriptDebugEnabled = store[Keys.LOCAL_TRANSCRIPT_DEBUG_ENABLED] ?: defaults.localTranscriptDebugEnabled
+                transcriptionEnabled = store[Keys.TRANSCRIPTION_ENABLED] ?: defaults.transcriptionEnabled
             )
         }
 
@@ -54,7 +54,7 @@ class DataStoreAppSettings(context: Context) : AppSettings {
             store[Keys.TOLERANCE_PCT] = prefs.tolerancePct
             store[Keys.FEEDBACK_COOLDOWN_MS] = prefs.feedbackCooldownMs
             store[Keys.MIC_SAMPLE_RATE] = prefs.micSampleRate
-            store[Keys.LOCAL_TRANSCRIPT_DEBUG_ENABLED] = prefs.localTranscriptDebugEnabled
+            store[Keys.TRANSCRIPTION_ENABLED] = prefs.transcriptionEnabled
         }
     }
 
@@ -63,6 +63,6 @@ class DataStoreAppSettings(context: Context) : AppSettings {
         val TOLERANCE_PCT = floatPreferencesKey("tolerance_pct")
         val FEEDBACK_COOLDOWN_MS = longPreferencesKey("feedback_cooldown_ms")
         val MIC_SAMPLE_RATE = intPreferencesKey("mic_sample_rate")
-        val LOCAL_TRANSCRIPT_DEBUG_ENABLED = booleanPreferencesKey("local_transcript_debug_enabled")
+        val TRANSCRIPTION_ENABLED = booleanPreferencesKey("transcription_enabled")
     }
 }

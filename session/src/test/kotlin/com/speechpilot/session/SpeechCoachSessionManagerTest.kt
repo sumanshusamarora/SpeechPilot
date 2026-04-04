@@ -10,6 +10,7 @@ import com.speechpilot.segmentation.SpeechSegment
 import com.speechpilot.segmentation.SpeechSegmenter
 import com.speechpilot.segmentation.VadSpeechSegmenter
 import com.speechpilot.transcription.LocalTranscriber
+import com.speechpilot.transcription.TranscriptionBackend
 import com.speechpilot.transcription.TranscriptStability
 import com.speechpilot.transcription.TranscriptUpdate
 import com.speechpilot.transcription.TranscriptionEngineStatus
@@ -308,6 +309,8 @@ private class NoOpTestTranscriber : LocalTranscriber {
     override val updates: Flow<TranscriptUpdate> = emptyFlow()
     override val status: StateFlow<TranscriptionEngineStatus> =
         MutableStateFlow(TranscriptionEngineStatus.Disabled)
+    override val activeBackend: StateFlow<TranscriptionBackend> =
+        MutableStateFlow(TranscriptionBackend.None)
 
     override suspend fun start() = Unit
     override suspend fun stop() = Unit
@@ -319,6 +322,8 @@ private class FakeTranscriber : LocalTranscriber {
 
     override val updates: Flow<TranscriptUpdate> = flow
     override val status: StateFlow<TranscriptionEngineStatus> = statusFlow
+    override val activeBackend: StateFlow<TranscriptionBackend> =
+        MutableStateFlow(TranscriptionBackend.AndroidSpeechRecognizer)
 
     override suspend fun start() {
         statusFlow.value = TranscriptionEngineStatus.Listening

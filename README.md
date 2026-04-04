@@ -28,7 +28,7 @@ SpeechPilot is structured as a multi-module Android project. Each module has a s
 | `feedback` | Decisioning and feedback events |
 | `data` | Persistence (Room, repositories) |
 | `settings` | User configuration (DataStore) |
-| `transcription` | Local debug transcription + rolling transcript WPM |
+| `transcription` | Local transcription — Vosk preferred backend, Android SR fallback, rolling transcript WPM |
 
 See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full architecture description.
 
@@ -97,29 +97,61 @@ app
 ---
 
 
-### Local transcript mode in live coaching
+### Transcription
 
-SpeechPilot includes an **optional local transcript mode** (Settings → Local transcript debug) that is now a first-class part of the live screen when enabled.
+Transcription is a **first-class feature** in SpeechPilot — enabled by default. It provides live on-device speech-to-text, producing a live transcript and text-derived WPM that the coaching engine uses as its primary pace signal.
 
-- Uses Android `SpeechRecognizer` with offline preference (`EXTRA_PREFER_OFFLINE=true`) as a best-effort signal
-- Produces incremental transcript text during active sessions
-- Computes a separate rolling **transcript-derived WPM** from finalized recognized words
-- Shows a dedicated transcript card in the main live session surface with explicit state:
-  - listening for speech
-  - partial transcript available
-  - final transcript available
-  - no final words yet
-  - transcription unavailable / recognizer error
-- Uses transcript-derived WPM as the primary user-facing pace metric when finalized transcript words exist
-- Keeps heuristic est-WPM visible as secondary/debug context
-- Is disabled by default and can be enabled in **Settings → Local transcript debug**
-- Keeps a compact debug panel focused on calibration essentials: speech activity, transcript engine/status, text WPM, heuristic pace, target, and last decision reason
+Transcription can be disabled in **Settings → Transcription** if not needed.
 
-> Notes: transcript quality/timing and true offline behavior depend on on-device speech services and installed language packs.
-> Changes to the transcript debug toggle apply on the next session start.
+#### Transcription backend strategy
+
+The app uses a **two-tier backend architecture**:
+
+| Backend | Role | Condition |
+|---|---|---|
+| **Vosk** (`VoskLocalTranscriber`) | **Preferred** — deterministic on-device STT, no cloud dependency | Active when model assets are installed |
+| **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when Vosk model is absent |
+| **No-op** (`NoOpLocalTranscriber`) | Transcription disabled | Settings → Transcription turned off |
+
+Selection is performed automatically by `RoutingLocalTranscriber` at session start:
+1. Attempt to start the Vosk backend
+2. If it reports `ModelUnavailable`, stop it and activate the Android SpeechRecognizer fallback
+3. Expose the active backend in `TranscriptDebugState.activeBackend`
+
+The active backend is visible in the debug panel as **Transcript backend**.
+
+#### Enabling Vosk (required for the primary backend to be active)
+
+Vosk requires model assets on the device. Until model files are present, the app falls back to Android SpeechRecognizer automatically and shows "model unavailable" in the debug panel.
+
+To install the model:
+1. Download a small English model from https://alphacephei.com/vosk/models (e.g. `vosk-model-small-en-us-0.15.zip`)
+2. Unzip and push to the device:
+   ```bash
+   adb push vosk-model-small-en-us /sdcard/Android/data/com.speechpilot/files/vosk-model-small-en-us
+   ```
+   Or copy to `context.filesDir/vosk-model-small-en-us` via `adb shell`.
+3. Restart the session. The Vosk backend will activate automatically.
+
+> **Note:** To also add the Vosk Java library (required for actual recognition beyond model-availability checking), add to `transcription/build.gradle.kts`:
+> ```
+> implementation("com.alphacephei:vosk-android:0.3.47@aar")
+> implementation("net.java.dev.jna:jna:5.13.0@aar")
+> ```
+> Then implement the `TODO: Vosk API` sections in `VoskLocalTranscriber.runRecognition()`.
+
+#### What transcription provides
+
+- Live transcript text displayed in a dedicated card during active sessions
+- Rolling **transcript-derived WPM** from finalized recognized words (primary pace signal when available)
+- Explicit status states: listening, partial transcript, final transcript, model unavailable, error
+- Heuristic est-WPM as secondary fallback when transcript is pending or unavailable
+
+> Notes: when Vosk is not yet fully integrated (no library added), the dedicated backend checks model availability but cannot produce transcripts. The Android SpeechRecognizer fallback activates instead.
+> Transcription setting changes apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
-> Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending by design, and the UI shows this explicitly.
-> Coaching decisions use transcript-derived WPM when transcript readiness is reached (finalized words + minimum rolling transcript words + healthy recognizer state). Until then, the app falls back explicitly to heuristic pace.
+> Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending by design.
+> Coaching decisions use transcript-derived WPM when transcript readiness is reached. Until then, the app falls back explicitly to heuristic pace.
 
 ---
 

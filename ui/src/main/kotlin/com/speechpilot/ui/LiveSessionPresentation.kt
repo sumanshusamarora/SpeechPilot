@@ -20,11 +20,11 @@ data class PaceMetricPresentation(
 )
 
 internal fun resolveTranscriptSurfacePresentation(state: MainUiState): TranscriptSurfacePresentation {
-    if (!state.transcriptDebugEnabled) {
+    if (!state.transcriptionEnabled) {
         return TranscriptSurfacePresentation(
             title = "Transcript",
             helperText = "Transcription unavailable",
-            bodyText = "Enable Local transcript debug in Settings to view on-device transcript text."
+            bodyText = "Enable transcription in Settings to view on-device transcript text."
         )
     }
 
@@ -40,6 +40,14 @@ internal fun resolveTranscriptSurfacePresentation(state: MainUiState): Transcrip
             title = "Transcript",
             helperText = "Transcription unavailable",
             bodyText = "This device/runtime does not currently provide local recognition."
+        )
+
+        TranscriptDebugStatus.ModelUnavailable -> TranscriptSurfacePresentation(
+            title = "Transcript",
+            helperText = "Dedicated STT model not installed",
+            bodyText = "Vosk model assets are required for on-device transcription. " +
+                "Place model files in the app's files directory to enable the dedicated backend. " +
+                "Using Android SpeechRecognizer as fallback."
         )
 
         TranscriptDebugStatus.Error -> TranscriptSurfacePresentation(

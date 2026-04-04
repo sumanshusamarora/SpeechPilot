@@ -5,6 +5,6 @@ data class UserPreferences(
     val tolerancePct: Float = 0.15f,
     val feedbackCooldownMs: Long = 5_000L,
     val micSampleRate: Int = 16_000,
-    /** Debug-only local transcript mode. Disabled by default due runtime overhead. */
-    val localTranscriptDebugEnabled: Boolean = false
+    /** Local on-device transcription. Enabled by default — provides transcript text and text-derived WPM. */
+    val transcriptionEnabled: Boolean = true
 )
