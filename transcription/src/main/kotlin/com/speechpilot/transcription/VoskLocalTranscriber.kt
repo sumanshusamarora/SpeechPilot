@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -144,6 +145,7 @@ class VoskLocalTranscriber(
                 _status.value = TranscriptionEngineStatus.Listening
 
                 source.collect { frame ->
+                    ensureActive()
                     if (!shouldRun) return@collect
                     val bytes = frame.samples.toLeByteArray()
                     if (rec.acceptWaveForm(bytes, bytes.size)) {
@@ -208,14 +210,17 @@ class VoskLocalTranscriber(
         internal fun parseVoskResult(json: String, stability: TranscriptStability): String {
             if (json.isBlank()) return ""
             return try {
-                val key = if (stability == TranscriptStability.Partial) "partial" else "text"
-                // Vosk emits compact JSON — a simple regex is lightweight and sufficient.
-                val regex = Regex(""""$key"\s*:\s*"([^"]*)"""")
+                val regex = if (stability == TranscriptStability.Partial) PARTIAL_REGEX else FINAL_REGEX
                 regex.find(json)?.groupValues?.getOrElse(1) { "" }?.trim() ?: ""
             } catch (_: Exception) {
                 ""
             }
         }
+
+        // Pre-compiled regex patterns for Vosk JSON parsing — avoids per-call compilation
+        // overhead since parseVoskResult is called on every recognised audio frame.
+        private val FINAL_REGEX = Regex(""""text"\s*:\s*"([^"]*)"""")
+        private val PARTIAL_REGEX = Regex(""""partial"\s*:\s*"([^"]*)"""")
     }
 }
 
