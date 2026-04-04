@@ -662,6 +662,8 @@ private fun ModelProvisioningCard(
 }
 
 
+@Composable
+fun AudioLevelBars(
     level: Float,
     isSpeechActive: Boolean,
     modifier: Modifier = Modifier
