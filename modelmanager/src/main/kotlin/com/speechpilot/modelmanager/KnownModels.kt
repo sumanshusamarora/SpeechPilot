@@ -24,6 +24,29 @@ object KnownModels {
         installDirName = "vosk-model-small-en-us",
         archiveRootDir = "vosk-model-small-en-us-0.15",
         version = "0.15",
+        archiveFormat = ModelArchiveFormat.ZIP,
+    )
+
+    /**
+     * Whisper.cpp ggml-small English STT model (~466 MB).
+     *
+     * Required by the Whisper.cpp transcription backend. The model is a single binary file
+     * downloaded directly from HuggingFace — no extraction step is needed.
+     *
+     * Installed at: `filesDir/whisper/ggml-small.bin`
+     *
+     * Download source: https://huggingface.co/ggerganov/whisper.cpp
+     */
+    val WHISPER_GGML_SMALL = LocalModelDescriptor(
+        id = "whisper-ggml-small",
+        type = ModelType.STT,
+        purpose = "On-device English speech recognition (Whisper.cpp, ggml-small)",
+        downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        installDirName = "whisper",
+        archiveRootDir = "",
+        singleFileName = "ggml-small.bin",
+        version = "ggml-small",
+        archiveFormat = ModelArchiveFormat.SINGLE_FILE,
     )
 
     // Future: Gemma 4 E2B (LLM) — uncomment and fill in when implementing Gemma support.
@@ -35,8 +58,9 @@ object KnownModels {
     //     installDirName = "gemma-4-e2b",
     //     archiveRootDir = "gemma-4-e2b",
     //     version = "4.0",
+    //     archiveFormat = ModelArchiveFormat.ZIP,
     // )
 
     /** All registered model descriptors. Consumed by [DefaultLocalModelManager] at init. */
-    val all: List<LocalModelDescriptor> = listOf(VOSK_SMALL_EN_US)
+    val all: List<LocalModelDescriptor> = listOf(VOSK_SMALL_EN_US, WHISPER_GGML_SMALL)
 }

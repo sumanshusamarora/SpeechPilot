@@ -51,4 +51,10 @@ data class MainUiState(
      * Null when transcription is disabled.
      */
     val voskModelInstallState: ModelInstallState? = null,
+    /**
+     * Current install state of the Whisper ggml-small model. Exposed when Whisper is the
+     * selected backend and transcription is enabled.
+     * Null when Whisper backend is not selected or transcription is disabled.
+     */
+    val whisperModelInstallState: ModelInstallState? = null,
 )

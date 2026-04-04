@@ -20,6 +20,8 @@ import com.speechpilot.transcription.AndroidSpeechRecognizerTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RoutingLocalTranscriber
 import com.speechpilot.transcription.VoskLocalTranscriber
+import com.speechpilot.transcription.WhisperCppLocalTranscriber
+import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,7 +56,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 latestPreferences = prefs
                 _uiState.update { it.copy(transcriptionEnabled = prefs.transcriptionEnabled) }
                 if (prefs.transcriptionEnabled) {
-                    triggerVoskProvisioning()
+                    if (prefs.preferWhisperBackend) {
+                        triggerWhisperModelProvisioning()
+                    } else {
+                        triggerVoskProvisioning()
+                    }
                 }
                 val isSessionActive = sessionManager?.liveState?.value?.sessionState == SessionState.Active
                 if (!isSessionActive) {
@@ -64,11 +70,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Starts observing the Vosk model install state and mirrors it into [uiState]. */
+    /** Starts observing model install states and mirrors them into [uiState]. */
     private fun observeModelState() {
         modelStateJob = viewModelScope.launch {
-            modelManager.stateOf(KnownModels.VOSK_SMALL_EN_US.id).collect { installState ->
-                _uiState.update { it.copy(voskModelInstallState = installState) }
+            launch {
+                modelManager.stateOf(KnownModels.VOSK_SMALL_EN_US.id).collect { installState ->
+                    _uiState.update { it.copy(voskModelInstallState = installState) }
+                }
+            }
+            launch {
+                modelManager.stateOf(KnownModels.WHISPER_GGML_SMALL.id).collect { installState ->
+                    _uiState.update { it.copy(whisperModelInstallState = installState) }
+                }
             }
         }
     }
@@ -84,10 +97,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Requests provisioning of the Whisper ggml-small model if it is not yet [ModelInstallState.Ready].
+     * The [modelManager] deduplicates concurrent requests.
+     */
+    private fun triggerWhisperModelProvisioning() {
+        viewModelScope.launch {
+            modelManager.ensureInstalled(KnownModels.WHISPER_GGML_SMALL.id)
+        }
+    }
+
     /** Retries a failed Vosk model download. Called from the UI retry action. */
     fun retryVoskModelInstall() {
         viewModelScope.launch {
             modelManager.retry(KnownModels.VOSK_SMALL_EN_US.id)
+        }
+    }
+
+    /** Retries a failed Whisper model download. Called from the UI retry action. */
+    fun retryWhisperModelInstall() {
+        viewModelScope.launch {
+            modelManager.retry(KnownModels.WHISPER_GGML_SMALL.id)
         }
     }
 
@@ -96,8 +126,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sessionManager?.release()
 
         val transcriber = if (prefs.transcriptionEnabled) {
+            val primaryTranscriber = if (prefs.preferWhisperBackend) {
+                val whisperModelFile = File(
+                    getApplication<Application>().filesDir,
+                    "${KnownModels.WHISPER_GGML_SMALL.installDirName}/${KnownModels.WHISPER_GGML_SMALL.singleFileName}"
+                )
+                WhisperCppLocalTranscriber.create(whisperModelFile)
+            } else {
+                VoskLocalTranscriber.create(getApplication())
+            }
             RoutingLocalTranscriber(
-                primaryTranscriber = VoskLocalTranscriber.create(getApplication()),
+                primaryTranscriber = primaryTranscriber,
                 fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
             )
         } else {
@@ -124,8 +163,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sessionManager?.release()
 
         val transcriber = if (prefs.transcriptionEnabled) {
+            val primaryTranscriber = if (prefs.preferWhisperBackend) {
+                val whisperModelFile = File(
+                    getApplication<Application>().filesDir,
+                    "${KnownModels.WHISPER_GGML_SMALL.installDirName}/${KnownModels.WHISPER_GGML_SMALL.singleFileName}"
+                )
+                WhisperCppLocalTranscriber.create(whisperModelFile)
+            } else {
+                VoskLocalTranscriber.create(getApplication())
+            }
             RoutingLocalTranscriber(
-                primaryTranscriber = VoskLocalTranscriber.create(getApplication()),
+                primaryTranscriber = primaryTranscriber,
                 fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
             )
         } else {

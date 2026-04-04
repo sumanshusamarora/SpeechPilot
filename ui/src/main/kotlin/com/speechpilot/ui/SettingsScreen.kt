@@ -44,6 +44,7 @@ fun SettingsScreen(
         onTolerancePctChange = viewModel::updateTolerancePct,
         onFeedbackCooldownChange = viewModel::updateFeedbackCooldownMs,
         onTranscriptionChange = viewModel::updateTranscriptionEnabled,
+        onPreferWhisperChange = viewModel::updatePreferWhisperBackend,
         onBack = onBack
     )
 }
@@ -55,6 +56,7 @@ private fun SettingsContent(
     onTolerancePctChange: (Float) -> Unit,
     onFeedbackCooldownChange: (Long) -> Unit,
     onTranscriptionChange: (Boolean) -> Unit,
+    onPreferWhisperChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -147,6 +149,43 @@ private fun SettingsContent(
                     checked = prefs.transcriptionEnabled,
                     onCheckedChange = onTranscriptionChange
                 )
+            }
+        }
+
+        if (prefs.transcriptionEnabled) {
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Use Whisper.cpp backend",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = if (prefs.preferWhisperBackend)
+                                "Whisper.cpp (ggml-small) is the primary STT backend. Requires ~466 MB model download. Better for accented English."
+                            else
+                                "Vosk is the primary STT backend. Requires ~40 MB model download. Toggle to switch to Whisper.cpp.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = prefs.preferWhisperBackend,
+                        onCheckedChange = onPreferWhisperChange
+                    )
+                }
             }
         }
     }
