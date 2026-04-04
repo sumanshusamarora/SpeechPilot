@@ -33,6 +33,7 @@ dependencies {
     implementation(project(":data"))
     implementation(project(":settings"))
     implementation(project(":transcription"))
+    implementation(project(":modelmanager"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

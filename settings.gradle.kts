@@ -34,3 +34,4 @@ include(":data")
 include(":settings")
 
 include(":transcription")
+include(":modelmanager")

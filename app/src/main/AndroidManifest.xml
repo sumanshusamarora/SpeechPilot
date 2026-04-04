@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Required on Android 14+ (API 34+) when using foreground service with microphone access -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Required for automatic Vosk model download and future on-device model provisioning -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".SpeechPilotApp"

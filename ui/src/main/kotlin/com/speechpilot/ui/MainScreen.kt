@@ -28,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.speechpilot.feedback.FeedbackEvent
+import com.speechpilot.modelmanager.ModelInstallState
 import com.speechpilot.session.PaceSignalSource
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.TranscriptDebugStatus
@@ -83,7 +85,8 @@ fun MainScreen(
         onDismissError = viewModel::dismissError,
         onAnalyzeFile = { fileLauncher.launch(arrayOf("audio/*")) },
         onOpenSettings = onOpenSettings,
-        onOpenHistory = onOpenHistory
+        onOpenHistory = onOpenHistory,
+        onRetryModelInstall = viewModel::retryVoskModelInstall,
     )
 }
 
@@ -95,7 +98,8 @@ private fun MainContent(
     onDismissError: () -> Unit,
     onAnalyzeFile: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenHistory: () -> Unit
+    onOpenHistory: () -> Unit,
+    onRetryModelInstall: () -> Unit,
 ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -156,6 +160,17 @@ private fun MainContent(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { BrandHeader() }
+
+            // Show model provisioning status when transcription is enabled and model is not Ready.
+            val modelState = state.voskModelInstallState
+            if (state.transcriptionEnabled && modelState != null && modelState !is ModelInstallState.Ready) {
+                item {
+                    ModelProvisioningCard(
+                        installState = modelState,
+                        onRetry = onRetryModelInstall,
+                    )
+                }
+            }
 
             item {
                 Row(
@@ -533,7 +548,120 @@ private fun DebugRow(label: String, value: String) {
 }
 
 @Composable
-private fun AudioLevelBars(
+private fun ModelProvisioningCard(
+    installState: ModelInstallState,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isFailed = installState is ModelInstallState.Failed
+    val cardColor = if (isFailed) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = if (isFailed) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Speech Model",
+                style = MaterialTheme.typography.labelLarge,
+                color = contentColor,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            when (installState) {
+                is ModelInstallState.NotInstalled, ModelInstallState.Queued -> {
+                    Text(
+                        text = "Preparing speech model download…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
+                    )
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+
+                is ModelInstallState.Downloading -> {
+                    val label = if (installState.progressPercent >= 0) {
+                        val mb = installState.bytesReceived / (1024 * 1024)
+                        val totalMb = if (installState.totalBytes > 0) {
+                            " / ${installState.totalBytes / (1024 * 1024)} MB"
+                        } else ""
+                        "Downloading… ${installState.progressPercent}% (${mb} MB$totalMb)"
+                    } else {
+                        val mb = installState.bytesReceived / (1024 * 1024)
+                        "Downloading… ${mb} MB received"
+                    }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
+                    )
+                    if (installState.progressPercent >= 0) {
+                        LinearProgressIndicator(
+                            progress = { installState.progressPercent / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+
+                ModelInstallState.Unpacking -> {
+                    Text(
+                        text = "Installing speech model…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
+                    )
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+
+                ModelInstallState.Verifying -> {
+                    Text(
+                        text = "Verifying speech model…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
+                    )
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+
+                is ModelInstallState.Failed -> {
+                    Text(
+                        text = "Speech model setup failed: ${installState.reason}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
+                    )
+                    Text(
+                        text = "Transcription will use the Android fallback until the model is installed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
+                    )
+                    TextButton(onClick = onRetry) {
+                        Text("Retry Download", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+
+                ModelInstallState.Ready -> {
+                    // Not shown — the card is hidden when state is Ready.
+                }
+            }
+        }
+    }
+}
+
+
     level: Float,
     isSpeechActive: Boolean,
     modifier: Modifier = Modifier

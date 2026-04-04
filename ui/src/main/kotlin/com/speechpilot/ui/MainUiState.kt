@@ -1,6 +1,7 @@
 package com.speechpilot.ui
 
 import com.speechpilot.feedback.FeedbackEvent
+import com.speechpilot.modelmanager.ModelInstallState
 import com.speechpilot.session.DebugPipelineInfo
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.TranscriptDebugState
@@ -43,5 +44,11 @@ data class MainUiState(
      * Content URI string of the file being analyzed, or null for live-microphone sessions.
      * Non-null only when [isFileSession] is true.
      */
-    val fileSessionUri: String? = null
+    val fileSessionUri: String? = null,
+    /**
+     * Current install state of the Vosk speech model. Exposed when transcription is enabled so
+     * the UI can show download/install progress or prompt the user to retry on failure.
+     * Null when transcription is disabled.
+     */
+    val voskModelInstallState: ModelInstallState? = null,
 )

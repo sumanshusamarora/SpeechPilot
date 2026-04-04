@@ -228,6 +228,67 @@ Users can turn it off in Settings → Transcription if not needed.
 Settings are observed continuously by `MainViewModel`.
 For active sessions, preference changes (including transcription enablement) apply from the next session start to avoid disrupting the running pipeline.
 
+### `modelmanager`
+
+Generic infrastructure for managing on-device AI model lifecycle. Responsible for downloading,
+extracting, and verifying local model assets so they are available to the relevant backend (e.g.
+Vosk STT, and future Gemma LLM models). No cloud inference or server-side processing — models
+are provisioned to the device's private files directory and used entirely locally.
+
+#### Core types
+
+| Type | Role |
+|---|---|
+| `ModelType` | Enum: `STT` (speech-to-text), `LLM` (large language model) |
+| `LocalModelDescriptor` | Immutable description of a model: id, type, purpose, download URL, install path, archive root dir, version, optional SHA-256 |
+| `ModelInstallState` | Sealed class lifecycle: `NotInstalled` → `Queued` → `Downloading(progress)` → `Unpacking` → `Verifying` → `Ready` / `Failed(reason)` |
+| `LocalModelManager` | Interface: `stateOf()`, `isReady()`, `ensureInstalled()`, `retry()` |
+| `DefaultLocalModelManager` | Concrete implementation. Downloads via `HttpURLConnection`, extracts via `ZipInputStream` with atomic staging rename, updates `StateFlow` throughout |
+| `KnownModels` | Registry of predefined model descriptors |
+
+#### Storage layout
+
+All model assets are installed into the app's private files directory (`Context.getFilesDir()`):
+
+```
+filesDir/
+  vosk-model-small-en-us/         ← Vosk STT model (auto-provisioned)
+    am/final.mdl                   ← acoustic model (readiness marker)
+    conf/
+    graph/
+    …
+  gemma-4-e2b/                    ← future Gemma LLM model (not yet implemented)
+```
+
+Partial downloads are kept as `<model-id>.download.tmp` and deleted on failure or completion.
+
+#### Provisioning flow
+
+1. `DefaultLocalModelManager` checks at init whether each registered model is already on disk.
+   If `am/final.mdl` (or flat `final.mdl` for STT models) is present, state starts as `Ready`.
+2. When `ensureInstalled(modelId)` is called (e.g. at ViewModel init when transcription is
+   enabled), provisioning is scheduled if the model is not already `Ready`.
+3. Download streams to a temp file with byte-level progress updates.
+4. Optional SHA-256 checksum verification.
+5. Archive is extracted to a staging directory; root prefix (e.g. `vosk-model-small-en-us-0.22/`)
+   is stripped so files land directly in the final install directory.
+6. Staging directory is atomically renamed to the final install path.
+7. State becomes `Ready` (or `Failed` if post-extraction readiness check fails).
+
+#### Extending for future models (e.g. Gemma 4 E2B)
+
+Add a new `LocalModelDescriptor` to `KnownModels.all`. The provisioning infrastructure
+requires no changes. Extend `isInstalledOnDisk` in `DefaultLocalModelManager` with a
+`ModelType.LLM`-specific readiness heuristic if the current non-empty-directory check is
+insufficient.
+
+#### Known limitations
+
+- Downloads are not resumable across process restarts.
+- No background scheduling (WorkManager). Provisioning is tied to `viewModelScope` lifetime.
+- No automatic retry on network failure — user must press Retry in the UI.
+- No WiFi-only gating or download size warnings.
+
 ---
 
 ## Data Flow
