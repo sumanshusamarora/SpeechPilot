@@ -139,35 +139,41 @@ The active backend is visible in the debug panel as **Transcript backend**.
 - Chunk-based inference: audio is buffered in 5-second windows before running inference
 - **Final-only updates** — no streaming partial results (inherent to Whisper's design)
 - May produce better transcript quality for accented English
-- Requires the `libwhisper.so` native library bundled in the APK (see "Whisper native library" below)
+- Native runtime is compiled automatically by CMake's `FetchContent` on first build — no manual step required
 
-##### Whisper native library
+##### Whisper native runtime (CMake + JNI)
 
-Whisper.cpp requires a pre-compiled native library. The library is **not bundled** in this repository. To build it:
+The native library is now **built automatically** as part of a normal `./gradlew assembleDebug` build.
 
-1. Clone `whisper.cpp`: `git clone https://github.com/ggerganov/whisper.cpp`
-2. Follow the Android NDK build instructions in [`examples/whisper.android/README.md`](https://github.com/ggerganov/whisper.cpp/blob/master/examples/whisper.android/README.md)
-3. Place the resulting `.so` files in `transcription/src/main/jniLibs/`:
-   ```
-   transcription/src/main/jniLibs/
-     arm64-v8a/libwhisper.so
-     x86_64/libwhisper.so
-   ```
+How it works:
+1. The `transcription` module declares an `externalNativeBuild` pointing to `transcription/src/main/cpp/CMakeLists.txt`
+2. The `CMakeLists.txt` uses CMake's `FetchContent` to download whisper.cpp (v1.7.2) from GitHub during the first CMake configure
+3. CMake builds `libwhisper_jni.so` (the JNI bridge) and statically links `libwhisper` into it
+4. The resulting `.so` is packaged into the APK for `arm64-v8a` and `x86_64`
 
-Without the native library, the Whisper backend reports `ModelUnavailable` and the app falls back to Android SpeechRecognizer automatically.
+On first build, CMake needs network access to clone the whisper.cpp repository (~100 MB). Subsequent builds use the CMake fetch cache and are fully offline. NDK version `26.3.11579264` is pinned for reproducibility.
 
-#### Automatic model provisioning
+If the native library fails to load at runtime (unsupported device, corrupted install), `WhisperNative.isAvailable` is `false` and the backend reports `ModelUnavailable` → Android SR fallback activates automatically.
 
-**No manual setup is required.** When transcription is enabled, the app automatically downloads and installs the selected backend's model on first launch:
+#### Automatic model provisioning (WorkManager-backed)
 
-- **Vosk model** is provisioned automatically when Vosk is the selected backend
-- **Whisper model** is provisioned automatically when Whisper is the selected backend
+**No manual setup is required.** The app automatically downloads the model required by the active STT backend. Downloads are managed by **WorkManager** so they survive app backgrounding.
 
-A **Speech Model** status card shows download progress and install state on the main screen.
+- **Vosk selected** → provisions Vosk model only (~40 MB, no Wi-Fi required)
+- **Whisper selected** → provisions Whisper model only (~466 MB, Wi-Fi recommended)
+- **Android SR** or transcription disabled → no model download
+
+A status card on the main screen shows:
+- Model display name and approximate download size
+- Wi-Fi recommendation for large models
+- Live download progress (percent + MB)
+- Retry button on failure
 
 Model install states:
 - Vosk: `NotInstalled` → `Queued` → `Downloading` → `Unpacking` → `Ready` / `Failed`
 - Whisper: `NotInstalled` → `Queued` → `Downloading` → `Ready` / `Failed` *(no unzip needed)*
+
+WorkManager ensures the download continues even if the user backgrounds the app. Network connectivity is required (WorkManager will wait for a connected network before starting).
 
 #### Local model storage layout
 
@@ -188,6 +194,7 @@ filesDir/
 - Rolling **transcript-derived WPM** from finalized recognized words (primary pace signal when available)
 - Explicit status states: listening, partial transcript, final transcript, model unavailable, error
 - Heuristic est-WPM as secondary fallback when transcript is pending or unavailable
+- **Chunk-based mode** (Whisper): WPM hold carries the last known pace for up to 10 seconds between chunks to avoid oscillation
 
 > Transcription setting changes apply on the next session start.
 > Transcript text is kept in-memory for the current session and is not stored in session history.
@@ -207,22 +214,22 @@ Key abstractions:
 
 | Class | Role |
 |---|---|
-| `LocalModelDescriptor` | Model metadata: id, type, download URL, install path, archive format, version, optional checksum |
+| `LocalModelDescriptor` | Model metadata: id, type, displayName, approxSizeMb, wifiRecommended, download URL, install path, archive format, version, optional checksum |
 | `ModelArchiveFormat` | `ZIP` (extract archive) or `SINGLE_FILE` (download binary directly) |
 | `ModelInstallState` | Observable state machine: `NotInstalled` → `Queued` → `Downloading` → `Unpacking`? → `Verifying`? → `Ready` / `Failed` |
 | `LocalModelManager` | Interface: `ensureInstalled()`, `stateOf()`, `isReady()`, `retry()` |
-| `DefaultLocalModelManager` | Concrete implementation: `HttpURLConnection` download, `ZipInputStream` extract (ZIP) or direct file placement (SINGLE_FILE), atomic staging |
+| `WorkManagerLocalModelManager` | Production implementation: schedules `ModelDownloadWorker` via WorkManager; maps `WorkInfo` → `StateFlow<ModelInstallState>` |
+| `ModelDownloadWorker` | `CoroutineWorker`: downloads model (HTTP), optional SHA-256 verify, ZIP extract or single-file install, reports progress via `setProgress()` |
+| `DefaultLocalModelManager` | Coroutine-scope-based implementation; used in unit tests without WorkManager dependency |
 | `KnownModels` | Predefined model registry — add new models here |
 
 Adding a new model (e.g. Gemma 4 E2B) requires only adding a `LocalModelDescriptor` to
 `KnownModels.all` and calling `ensureInstalled()` from the appropriate ViewModel — no changes
 to provisioning logic.
 
-**Known limitations (first iteration):**
-- Downloads are not resumable across process restarts
-- No WorkManager background scheduling — provisioning is tied to ViewModel scope
-- No automatic retry; user must press Retry on failure
-- No WiFi-only gating or download size warnings
+**Current limitations:**
+- Downloads are not resumable across process restarts (partial files are discarded; next call restarts from zero)
+- No automatic retry on transient network failure; user must press Retry on failure
 
 ---
 

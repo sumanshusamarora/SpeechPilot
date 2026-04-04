@@ -198,17 +198,36 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 - `WhisperCppLocalTranscriber` also uses the shared audio frame stream. It **buffers PCM frames**
   internally in 5-second chunks before running inference. It emits **Final-only** updates — there
   are no streaming partial results. This is intentional: Whisper is a chunk-based encoder-decoder.
-- Whisper requires the `libwhisper.so` native library. Without it, `WhisperCppLocalTranscriber`
-  reports `ModelUnavailable` and the fallback activates automatically.
+- Whisper's native runtime (`libwhisper_jni.so`) is built automatically by CMake `FetchContent` during
+  `./gradlew assembleDebug`. whisper.cpp v1.7.2 is fetched from GitHub on first build (requires network);
+  subsequent builds use the CMake cache. NDK `26.3.11579264` is pinned. ABIs: `arm64-v8a`, `x86_64`.
+  If the library fails to load at runtime, `WhisperNative.isAvailable = false` → `ModelUnavailable` →
+  automatic fallback to Android SR.
 - The Vosk AAR (`com.alphacephei:vosk-android:0.3.47`) and JNA companion
   (`net.java.dev.jna:jna:5.13.0`) are wired in `transcription/build.gradle.kts`.
 - `AndroidSpeechRecognizerTranscriber` behavior (quality, offline availability, latency) varies
   by device and speech service provider — this is the fundamental reason a dedicated backend is preferred.
 
+#### Chunk-based WPM hold (Whisper)
+
+`RollingTranscriptWpmCalculator` supports a **chunk-based mode** (`chunkBased = true`) enabled
+automatically when the active backend is `TranscriptionBackend.WhisperCpp`.
+
+Without smoothing, Whisper's 5-second chunk boundary causes the rolling WPM to fluctuate as
+word observations age out of the 30-second window. The hold strategy:
+
+- After each Final update the last computed WPM is stored as `heldWpm`
+- Between chunks (while `timeSinceLastChunk ≤ wpmHoldDurationMs`, default 10 s), if the live
+  rolling WPM drops below `heldWpm`, the held value is returned instead
+- If the hold expires or the live WPM overtakes the held value, live WPM resumes
+
+`TranscriptDebugState.isChunkBased` and `lastChunkAtMs` expose this to the UI so it can
+display "Whisper processing…" rather than appearing to stall.
+
 #### Other transcript components
 
-- `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only.
-- `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, and pending flags.
+- `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only. Supports `chunkBased` mode with WPM hold for Whisper backends.
+- `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, pending flags, `isChunkBased`, and `lastChunkAtMs`.
 - `WhisperRunner` interface (with `WhisperNativeRunner` production and `FakeWhisperRunner` test implementations) abstracts native JNI calls for testability.
 
 **Current behavior:** transcript-derived WPM is the **primary displayed pace metric** in transcript mode when finalized words exist, and becomes the **feedback decision signal** once transcript readiness is reached.
@@ -257,18 +276,20 @@ Supports two packaging formats:
 |---|---|
 | `ModelType` | Enum: `STT` (speech-to-text), `LLM` (large language model) |
 | `ModelArchiveFormat` | Enum: `ZIP` (archive extraction) or `SINGLE_FILE` (direct binary placement) |
-| `LocalModelDescriptor` | Immutable description of a model: id, type, purpose, download URL, install path, archive format, single filename, version, optional SHA-256 |
+| `LocalModelDescriptor` | Immutable description of a model: id, type, displayName, approxSizeMb, wifiRecommended, purpose, download URL, install path, archive format, single filename, version, optional SHA-256 |
 | `ModelInstallState` | Sealed class lifecycle: `NotInstalled` → `Queued` → `Downloading(progress)` → `Unpacking`? → `Verifying`? → `Ready` / `Failed(reason)` |
 | `LocalModelManager` | Interface: `stateOf()`, `isReady()`, `ensureInstalled()`, `retry()` |
-| `DefaultLocalModelManager` | Concrete implementation. Downloads via `HttpURLConnection`, extracts via `ZipInputStream` (ZIP) or places binary file directly (SINGLE_FILE), updates `StateFlow` throughout |
+| `WorkManagerLocalModelManager` | Production implementation. Schedules `ModelDownloadWorker` via WorkManager; maps `WorkInfo` progress → `StateFlow<ModelInstallState>`; survives app backgrounding |
+| `ModelDownloadWorker` | `CoroutineWorker`. Downloads via `HttpURLConnection`; extracts ZIP or places single file; reports progress via `setProgress()`; outputs error message on failure |
+| `DefaultLocalModelManager` | Coroutine-scope-based implementation used in unit tests (no WorkManager dependency) |
 | `KnownModels` | Registry of predefined model descriptors |
 
 #### Registered models
 
-| Model ID | Type | Format | Description | Size |
-|---|---|---|---|---|
-| `vosk-model-small-en-us` | STT | ZIP | Vosk small English model | ~40 MB |
-| `whisper-ggml-small` | STT | SINGLE_FILE | Whisper.cpp ggml-small model | ~466 MB |
+| Model ID | Type | Format | Description | Size | Wi-Fi |
+|---|---|---|---|---|---|
+| `vosk-model-small-en-us` | STT | ZIP | Vosk small English model | ~40 MB | Not required |
+| `whisper-ggml-small` | STT | SINGLE_FILE | Whisper.cpp ggml-small model | ~466 MB | Recommended |
 
 #### Storage layout
 
@@ -290,18 +311,30 @@ Partial downloads are kept as `<model-id>.download.tmp` and deleted on failure o
 
 #### Provisioning flow
 
-**ZIP models (Vosk):**
-1. Download to temp file with byte-level progress.
-2. Optional SHA-256 checksum verification.
-3. Extract archive to staging directory; strip root prefix.
-4. Atomic rename of staging directory to final install path.
-5. State becomes `Ready` when `am/final.mdl` or `final.mdl` is found.
+**ZIP models (Vosk) via WorkManager:**
+1. `ensureInstalled(id)` enqueues `ModelDownloadWorker` via WorkManager (unique work, REPLACE policy)
+2. WorkManager waits for network connectivity before starting
+3. Worker downloads to temp file; posts percent/byte progress via `setProgress()`
+4. Optional SHA-256 verification
+5. ZIP extraction to staging directory; strip root prefix; atomic rename to install path
+6. `ModelDownloadWorker` returns `Result.success()` → observer maps to `ModelInstallState.Ready`
 
-**SINGLE_FILE models (Whisper):**
-1. Download to temp file with byte-level progress.
-2. Optional SHA-256 checksum verification.
-3. Create install directory (`filesDir/whisper/`), move temp file to `ggml-small.bin`.
-4. State becomes `Ready` when the binary file exists. *(No `Unpacking` step.)*
+**SINGLE_FILE models (Whisper) via WorkManager:**
+1–4. Same as above
+5. Create install directory; move temp file directly → no `Unpacking` step
+6. `ModelDownloadWorker` returns `Result.success()` → `Ready`
+
+WorkManager ensures the download survives backgrounding. If the process is killed mid-download,
+WorkManager restarts the worker automatically when the app returns and network is available
+(note: partial downloads are not resumable; the temp file is deleted and the download restarts).
+
+**Active-backend-only provisioning:**
+`MainViewModel` calls `ensureInstalled()` only for the model required by the currently selected backend:
+- Vosk selected → provision `vosk-model-small-en-us` only
+- Whisper selected → provision `whisper-ggml-small` only
+- Transcription disabled → no provisioning
+
+The inactive backend's model is never eagerly downloaded. Backend switching triggers a new `ensureInstalled()` call for the newly selected backend's model.
 
 #### Extending for future models (e.g. Gemma 4 E2B)
 
@@ -311,10 +344,8 @@ readiness heuristic if the current non-empty-directory check is insufficient.
 
 #### Known limitations
 
-- Downloads are not resumable across process restarts.
-- No background scheduling (WorkManager). Provisioning is tied to `viewModelScope` lifetime.
-- No automatic retry on network failure — user must press Retry in the UI.
-- No WiFi-only gating or download size warnings.
+- Downloads are not resumable across process restarts (partial temp file is deleted; download restarts from zero).
+- No automatic retry on transient network failure — user must press Retry in the UI.
 
 ---
 

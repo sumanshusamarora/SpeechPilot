@@ -496,3 +496,60 @@ Gemma 4 E2B support in a future iteration requires only:
 - Backend API
 - Analytics / crash reporting
 - DI framework (Hilt / Koin)
+
+---
+
+## Phase 2 — Whisper Backend Stabilisation (iteration 2)
+
+**Goal:** Fix native runtime packaging, move provisioning to WorkManager, tighten active-backend provisioning, improve chunked WPM UX, add model download metadata.
+
+### Changes
+
+- [x] **CMake/JNI native packaging** (`transcription`)
+  - `transcription/src/main/cpp/CMakeLists.txt`: uses `FetchContent` to pull whisper.cpp v1.7.2 from GitHub during `./gradlew assembleDebug` CMake configure
+  - `transcription/src/main/cpp/whisper_jni.cpp`: JNI bridge matching `WhisperNative.kt` `external` function signatures
+  - `transcription/build.gradle.kts`: adds `externalNativeBuild { cmake { path } }`, `ndkVersion = "26.3.11579264"`, `ndk.abiFilters = ["arm64-v8a", "x86_64"]`
+  - No manual build step required: first `./gradlew assembleDebug` downloads and compiles whisper.cpp automatically
+
+- [x] **Model metadata** (`modelmanager/LocalModelDescriptor`)
+  - Added `displayName: String`, `approxSizeMb: Int`, `wifiRecommended: Boolean`
+  - `KnownModels.VOSK_SMALL_EN_US`: displayName="Vosk small (en-US)", approxSizeMb=40, wifiRecommended=false
+  - `KnownModels.WHISPER_GGML_SMALL`: displayName="Whisper small (ggml)", approxSizeMb=466, wifiRecommended=true
+
+- [x] **WorkManager provisioning** (`modelmanager`)
+  - Added `work-runtime-ktx:2.9.1` to `libs.versions.toml` and `modelmanager/build.gradle.kts`
+  - `ModelDownloadWorker` (CoroutineWorker): downloads via `HttpURLConnection`, optional SHA-256 verify, ZIP extract or single-file install, reports progress via `setProgress()` Data
+  - `WorkManagerLocalModelManager` (implements `LocalModelManager`): schedules `ModelDownloadWorker` (REPLACE policy), maps `WorkInfo` → `StateFlow<ModelInstallState>` via `getWorkInfosForUniqueWorkFlow()`
+  - Provisioning now survives app backgrounding — WorkManager reschedules interrupted workers
+
+- [x] **Active-backend-only provisioning** (`ui/MainViewModel`)
+  - Replaced `DefaultLocalModelManager` with `WorkManagerLocalModelManager`
+  - Consolidated two provisioning methods into `triggerActiveBackendModelProvisioning(prefs)` — provisions only the active backend's model
+  - `observeActiveModelState()` restarts when preferences change, observes only the active model
+  - `MainUiState` simplified: replaced `voskModelInstallState` + `whisperModelInstallState` with unified `activeModelInstallState`, `activeModelDisplayName`, `activeModelApproxSizeMb`, `activeModelWifiRecommended`
+  - `MainScreen.ModelProvisioningCard` shows model name, size, and Wi-Fi recommendation
+
+- [x] **Chunk-based WPM hold** (`transcription`)
+  - `RollingTranscriptWpmCalculator`: new `chunkBased` mode; when enabled, `heldWpm` is preserved for `wpmHoldDurationMs` (default 2× chunk duration = 10 s) after each Final update, preventing oscillation between chunks
+  - `setChunkBased(Boolean)` allows runtime reconfiguration
+  - `TranscriptWpmSnapshot` gains `isChunkBased: Boolean`, `lastChunkAtMs: Long?`
+  - `TranscriptDebugState` gains `isChunkBased: Boolean`, `lastChunkAtMs: Long?`
+  - `SpeechCoachSessionManager.startTranscriptionCollector()` sets `chunkBased=true` when active backend is `WhisperCpp`
+
+- [x] **Tests**
+  - `RollingTranscriptWpmCalculatorTest`: 9 new chunk/hold tests covering chunk mode, hold behavior, expiry, reset
+  - `WorkManagerLocalModelManagerTest`: disk-check logic (SINGLE_FILE and ZIP), model metadata validation, work-name uniqueness
+
+- [x] **Documentation**: Updated README.md, phase1_architecture.md, plan.md
+
+**Architecture notes:**
+- `WorkManagerLocalModelManager` replaces `DefaultLocalModelManager` in production; `DefaultLocalModelManager` is retained for unit tests
+- The CMake `FetchContent` approach mirrors standard Android native library patterns; no hidden manual steps
+- `chunkBased` WPM hold is transparent to the pace decision layer — `selectPaceSignal()` sees the same smooth WPM signal regardless of backend
+- `LocalModelDescriptor` metadata fields (`displayName`, `approxSizeMb`, `wifiRecommended`) are generic — future Gemma models will use the same fields
+
+**Remaining limitations:**
+- Downloads are not resumable (partial temp file deleted; download restarts from zero)
+- No automatic retry on transient failure — user must press Retry
+- First CMake build requires network to fetch whisper.cpp source (~100 MB)
+- Whisper inference on the `small` model is CPU-only (no GPU/Metal acceleration) — may be slow on low-end devices
