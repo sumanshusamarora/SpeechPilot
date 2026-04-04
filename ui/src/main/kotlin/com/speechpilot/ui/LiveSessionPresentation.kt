@@ -50,6 +50,14 @@ internal fun resolveTranscriptSurfacePresentation(state: MainUiState): Transcrip
                 "Using Android SpeechRecognizer as fallback."
         )
 
+        TranscriptDebugStatus.NativeLibraryUnavailable -> TranscriptSurfacePresentation(
+            title = "Transcript",
+            helperText = "Whisper runtime unavailable — using Android fallback",
+            bodyText = "The Whisper native library (libwhisper_jni.so) could not be loaded on " +
+                "this device. The Android SpeechRecognizer is active as fallback. " +
+                "Ensure the app was built with NDK native compilation enabled."
+        )
+
         TranscriptDebugStatus.Error -> TranscriptSurfacePresentation(
             title = "Transcript",
             helperText = "Transcription unavailable",

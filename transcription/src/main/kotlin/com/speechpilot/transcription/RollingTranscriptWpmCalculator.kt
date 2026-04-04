@@ -29,14 +29,15 @@ import kotlin.math.max
  * @param windowMs Duration of the rolling WPM window in milliseconds. Default: 30 seconds.
  * @param chunkBased Set to `true` for chunk-based backends (Whisper) to enable WPM hold.
  * @param chunkDurationMs Expected inter-chunk gap in milliseconds. Used to set sensible defaults
- *   for [wpmHoldDurationMs].
+ *   for [wpmHoldDurationMs]. Default matches [WhisperCppLocalTranscriber.CHUNK_DURATION_SAMPLES]
+ *   at 16 kHz (2 seconds).
  * @param wpmHoldDurationMs How long to hold the last WPM value after a final update when in
  *   chunk-based mode. Defaults to 2× [chunkDurationMs] to span one full gap plus buffer.
  */
 class RollingTranscriptWpmCalculator(
     private val windowMs: Long = 30_000L,
     chunkBased: Boolean = false,
-    val chunkDurationMs: Long = 5_000L,
+    val chunkDurationMs: Long = 2_000L,
     val wpmHoldDurationMs: Long = chunkDurationMs * 2,
 ) {
     /** `true` when the active backend emits Final-only chunk updates (e.g. Whisper.cpp). */

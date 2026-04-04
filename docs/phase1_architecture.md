@@ -185,7 +185,8 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 |---|---|
 | `Disabled` | Not running |
 | `InitializingModel` | Backend loading model |
-| `ModelUnavailable` | Model assets not found (Vosk) or model file / native library absent (Whisper) |
+| `ModelUnavailable` | Model file not found on disk (Vosk model dir or Whisper ggml file absent) |
+| `NativeLibraryUnavailable` | `libwhisper_jni.so` failed to load — triggers Android SR fallback |
 | `Listening` | Engine active and listening |
 | `Restarting` | Auto-restart at result boundary (SpeechRecognizer) |
 | `Unavailable` | Device/service does not provide recognition |
@@ -196,13 +197,15 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 - `VoskLocalTranscriber` uses the shared app audio frame stream via `setAudioSource` — it does
   **not** open a second `AudioRecord`. Emits streaming partial + final results.
 - `WhisperCppLocalTranscriber` also uses the shared audio frame stream. It **buffers PCM frames**
-  internally in 5-second chunks before running inference. It emits **Final-only** updates — there
+  internally in **2-second chunks** before running inference. It emits **Final-only** updates — there
   are no streaming partial results. This is intentional: Whisper is a chunk-based encoder-decoder.
 - Whisper's native runtime (`libwhisper_jni.so`) is built automatically by CMake `FetchContent` during
   `./gradlew assembleDebug`. whisper.cpp v1.7.2 is fetched from GitHub on first build (requires network);
   subsequent builds use the CMake cache. NDK `26.3.11579264` is pinned. ABIs: `arm64-v8a`, `x86_64`.
-  If the library fails to load at runtime, `WhisperNative.isAvailable = false` → `ModelUnavailable` →
-  automatic fallback to Android SR.
+  If the library fails to load at runtime, `WhisperNative.isAvailable = false` →
+  `TranscriptionEngineStatus.NativeLibraryUnavailable` → automatic fallback to Android SR.
+  If the model file is absent, the status is `ModelUnavailable` → same fallback path.
+  These two failure modes are now **distinct** to enable explicit user-facing diagnostics.
 - The Vosk AAR (`com.alphacephei:vosk-android:0.3.47`) and JNA companion
   (`net.java.dev.jna:jna:5.13.0`) are wired in `transcription/build.gradle.kts`.
 - `AndroidSpeechRecognizerTranscriber` behavior (quality, offline availability, latency) varies
@@ -213,26 +216,40 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 `RollingTranscriptWpmCalculator` supports a **chunk-based mode** (`chunkBased = true`) enabled
 automatically when the active backend is `TranscriptionBackend.WhisperCpp`.
 
-Without smoothing, Whisper's 5-second chunk boundary causes the rolling WPM to fluctuate as
+Without smoothing, Whisper's **2-second** chunk boundary causes the rolling WPM to fluctuate as
 word observations age out of the 30-second window. The hold strategy:
 
 - After each Final update the last computed WPM is stored as `heldWpm`
-- Between chunks (while `timeSinceLastChunk ≤ wpmHoldDurationMs`, default 10 s), if the live
-  rolling WPM drops below `heldWpm`, the held value is returned instead
+- Between chunks (while `timeSinceLastChunk ≤ wpmHoldDurationMs`, default 4 s = 2×chunkDuration),
+  if the live rolling WPM drops below `heldWpm`, the held value is returned instead
 - If the hold expires or the live WPM overtakes the held value, live WPM resumes
 
 `TranscriptDebugState.isChunkBased` and `lastChunkAtMs` expose this to the UI so it can
 display "Whisper processing…" rather than appearing to stall.
 
+#### Whisper runtime availability diagnostics
+
+Whisper activation now exposes explicit first-class state rather than silently degrading.
+`RoutingLocalTranscriber` falls back on **two distinct statuses**:
+
+| Status | Meaning | Fallback trigger |
+|---|---|---|
+| `ModelUnavailable` | ggml model file missing from `filesDir/whisper/` | Yes |
+| `NativeLibraryUnavailable` | `System.loadLibrary("whisper_jni")` failed at startup | Yes |
+
+When the selected backend is Whisper but the native library is not loaded, the UI shows a
+persistent **"Whisper runtime unavailable"** error card (not just a vague "transcript pending"
+state). The debug panel exposes **Whisper selected** and **Whisper native lib** rows directly.
+
 #### Other transcript components
 
-- `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only. Supports `chunkBased` mode with WPM hold for Whisper backends.
+- `RollingTranscriptWpmCalculator` computes a rolling transcript-derived WPM from **finalized** recognized words only. Supports `chunkBased` mode with WPM hold for Whisper backends (default hold = 4 s = 2 × 2-second chunk).
 - `TranscriptDebugState` exposes typed transcript runtime diagnostics including `activeBackend`, `engineStatus`, text preview, word counts, pending flags, `isChunkBased`, and `lastChunkAtMs`.
 - `WhisperRunner` interface (with `WhisperNativeRunner` production and `FakeWhisperRunner` test implementations) abstracts native JNI calls for testability.
 
 **Current behavior:** transcript-derived WPM is the **primary displayed pace metric** in transcript mode when finalized words exist, and becomes the **feedback decision signal** once transcript readiness is reached.
 
-**Fallback behavior:** if transcript is pending/unavailable/model-missing/error, decisioning falls back explicitly to heuristic pace (or no-signal when neither is usable).
+**Fallback behavior:** if transcript is pending/unavailable/model-missing/native-library-unavailable/error, decisioning falls back explicitly to heuristic pace (or no-signal when neither is usable).
 
 ### `data`
 

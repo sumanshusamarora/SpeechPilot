@@ -13,6 +13,15 @@ enum class TranscriptionEngineStatus {
     InitializingModel,
     /** Dedicated backend could not start: model assets were not found on the device. */
     ModelUnavailable,
+    /**
+     * Whisper native library (`libwhisper_jni.so`) was not loaded by the runtime.
+     *
+     * This is distinct from [ModelUnavailable]: the model file may be present, but the native
+     * library failed to load (e.g. ABI mismatch, missing from APK, unit-test build without
+     * native compilation). [RoutingLocalTranscriber] treats this as an unrecoverable backend
+     * failure and activates the Android SpeechRecognizer fallback.
+     */
+    NativeLibraryUnavailable,
     /** Engine is actively listening and may produce transcript updates. */
     Listening,
     /** Engine is restarting (e.g. SpeechRecognizer result boundary — auto-restart in progress). */

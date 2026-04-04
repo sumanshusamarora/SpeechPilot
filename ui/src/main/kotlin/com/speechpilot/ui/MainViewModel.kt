@@ -22,6 +22,7 @@ import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RoutingLocalTranscriber
 import com.speechpilot.transcription.VoskLocalTranscriber
 import com.speechpilot.transcription.WhisperCppLocalTranscriber
+import com.speechpilot.transcription.WhisperNative
 import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,7 +64,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             appSettings.preferences.collect { prefs ->
                 latestPreferences = prefs
-                _uiState.update { it.copy(transcriptionEnabled = prefs.transcriptionEnabled) }
+                _uiState.update {
+                    it.copy(
+                        transcriptionEnabled = prefs.transcriptionEnabled,
+                        whisperSelected = prefs.preferWhisperBackend,
+                        whisperNativeLibLoaded = WhisperNative.isAvailable,
+                    )
+                }
 
                 // Provision only the model required for the currently selected backend.
                 if (prefs.transcriptionEnabled) {

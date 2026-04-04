@@ -31,7 +31,7 @@ import java.io.File
  *
  * Whisper operates on fixed-size audio chunks rather than streaming frame-by-frame. PCM audio
  * frames from the shared pipeline are buffered internally, and inference is run on the accumulated
- * buffer when it reaches [chunkDurationSamples] (default: 5 seconds of audio). This means:
+ * buffer when it reaches [chunkDurationSamples] (default: 2 seconds of audio). This means:
  *
  * - Transcript updates are **chunk-based and Final-only** — no partial results are emitted.
  * - There is an inherent latency of up to [chunkDurationSamples] / [SAMPLE_RATE_HZ] seconds.
@@ -44,12 +44,14 @@ import java.io.File
  *
  * This backend requires:
  * 1. The ggml model binary at [modelFile] (e.g. `filesDir/whisper/ggml-small.bin`).
- * 2. The `libwhisper.so` native library bundled with the APK (via `jniLibs/`).
+ * 2. The `libwhisper_jni.so` native library bundled with the APK (built via CMake FetchContent).
  *
- * If either requirement is not met, [start] will report [TranscriptionEngineStatus.ModelUnavailable]
- * immediately, and [RoutingLocalTranscriber] will activate the Android SR fallback.
+ * If the model file is missing, [start] reports [TranscriptionEngineStatus.ModelUnavailable].
+ * If the native library failed to load (`System.loadLibrary("whisper_jni")` threw
+ * [UnsatisfiedLinkError]), [start] reports [TranscriptionEngineStatus.NativeLibraryUnavailable].
+ * In both cases [RoutingLocalTranscriber] activates the Android SR fallback.
  *
- * See [WhisperNative] for details on how to build and bundle the native library.
+ * See [WhisperNative] for details on how the native library is built and packaged.
  *
  * @param modelFile Path to the ggml model binary (e.g. `filesDir/whisper/ggml-small.bin`).
  * @param runner Abstracts the native Whisper calls; defaults to [WhisperNativeRunner]. Inject
@@ -102,7 +104,7 @@ class WhisperCppLocalTranscriber(
                 return@launch
             }
             if (!runner.isAvailable) {
-                _status.value = TranscriptionEngineStatus.ModelUnavailable
+                _status.value = TranscriptionEngineStatus.NativeLibraryUnavailable
                 return@launch
             }
             runInference()
@@ -204,9 +206,13 @@ class WhisperCppLocalTranscriber(
 
         /**
          * Default number of PCM samples to accumulate before running inference.
-         * 80,000 samples = 5 seconds of audio at 16 kHz.
+         * 32,000 samples = 2 seconds of audio at 16 kHz.
+         *
+         * 2 seconds is a practical balance between transcript latency and recognition accuracy.
+         * Lower values (< 1 s) reduce accuracy; higher values (5 s+) feel unresponsive during
+         * live coaching. Inject a custom [chunkDurationSamples] to override for testing.
          */
-        const val CHUNK_DURATION_SAMPLES = SAMPLE_RATE_HZ * 5
+        const val CHUNK_DURATION_SAMPLES = SAMPLE_RATE_HZ * 2
 
         private const val SHORT_MAX_FLOAT = Short.MAX_VALUE.toFloat()
         private const val INVALID_CTX = 0L
