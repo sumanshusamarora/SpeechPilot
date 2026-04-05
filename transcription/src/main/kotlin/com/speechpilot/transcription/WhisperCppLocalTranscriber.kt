@@ -291,7 +291,10 @@ class WhisperCppLocalTranscriber(
                     nativeInitAttempted = true,
                     nativeInitContextPointer = ctx,
                 )
-                if (ctx <= 0L) {
+                // JNI returns the raw native pointer bits as a signed Long. Valid 64-bit
+                // addresses may appear negative when the top bit is set, so only 0 means
+                // "no context".
+                if (ctx == INVALID_CTX) {
                     _status.value = TranscriptionEngineStatus.Error
                     _diagnostics.value = _diagnostics.value.copy(
                         selectedBackendStatus = TranscriptionEngineStatus.Error,
@@ -378,7 +381,7 @@ class WhisperCppLocalTranscriber(
                     )
                 }
             } finally {
-                if (ctx > 0L) runner.free(ctx)
+                if (ctx != INVALID_CTX) runner.free(ctx)
             }
         }
     }
@@ -530,7 +533,7 @@ class FakeWhisperRunner(
         initCallCount++
         pendingError = when {
             !isAvailable -> "Whisper native library unavailable"
-            contextHandle <= 0L -> initErrorMessage ?: "Whisper native init returned null context"
+            contextHandle == 0L -> initErrorMessage ?: "Whisper native init returned null context"
             else -> null
         }
         return if (isAvailable) contextHandle else 0L

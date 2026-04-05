@@ -224,6 +224,26 @@ class WhisperCppLocalTranscriberTest {
         assertEquals(true, transcriber.diagnostics.value.selectedBackendReady)
     }
 
+    @Test
+    fun `start accepts signed native pointer handles with high bit set`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val nativePointerBits = -5476377111402469280L // 0xb40000722a45a060 as signed Long
+        val transcriber = makeTranscriber(
+            modelFile = modelFile,
+            runner = FakeWhisperRunner(isAvailable = true, contextHandle = nativePointerBits),
+            ioDispatcher = testDispatcher,
+        )
+        transcriber.setAudioSource(emptyFlow())
+
+        transcriber.start()
+        advanceUntilIdle()
+
+        assertEquals(TranscriptionEngineStatus.Listening, transcriber.status.value)
+        assertEquals(nativePointerBits, transcriber.diagnostics.value.nativeInitContextPointer)
+        assertEquals(true, transcriber.diagnostics.value.selectedBackendReady)
+    }
+
     // -------------------------------------------------------------------------------------
     // stop
     // -------------------------------------------------------------------------------------
