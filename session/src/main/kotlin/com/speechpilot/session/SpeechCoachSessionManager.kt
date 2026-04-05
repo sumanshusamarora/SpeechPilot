@@ -291,6 +291,8 @@ class SpeechCoachSessionManager(
             else -> Unit
         }
         _state.value = SessionState.Stopping
+        // Stop the microphone first so any blocking AudioRecord read can unwind before we wait.
+        audioCapture.stop()
         pipelineJob?.cancelAndJoin()
         pipelineJob = null
 

@@ -18,6 +18,7 @@ import com.speechpilot.transcription.TranscriptUpdate
 import com.speechpilot.transcription.TranscriptionEngineStatus
 import com.speechpilot.vad.EnergyBasedVad
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +31,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -40,6 +42,7 @@ class SpeechCoachSessionManagerTest {
 
     private fun buildManager(
         scheduler: TestCoroutineScheduler? = null,
+        audioCapture: AudioCapture = NoOpAudioCapture(),
         segmenter: SpeechSegmenter = NoOpSegmenter(),
         paceEstimator: PaceEstimator = ConstantPaceEstimator(estimatedWpm = 120.0),
         transcriber: LocalTranscriber = NoOpTestTranscriber(),
@@ -48,7 +51,7 @@ class SpeechCoachSessionManagerTest {
         val dispatcher = if (scheduler != null) UnconfinedTestDispatcher(scheduler)
         else UnconfinedTestDispatcher()
         return SpeechCoachSessionManager(
-            audioCapture = NoOpAudioCapture(),
+            audioCapture = audioCapture,
             segmenter = segmenter,
             paceEstimator = paceEstimator,
             feedbackDecision = feedbackDecision,
@@ -88,6 +91,25 @@ class SpeechCoachSessionManagerTest {
         advanceUntilIdle()
         manager.stop()
         advanceUntilIdle()
+        assertEquals(SessionState.Idle, manager.state.value)
+        manager.release()
+    }
+
+    @Test
+    fun `stop signals audio capture before waiting for pipeline cancellation`() = runTest {
+        val audioCapture = StopSensitiveAudioCapture()
+        val manager = buildManager(
+            scheduler = testScheduler,
+            audioCapture = audioCapture
+        )
+
+        manager.start()
+
+        withTimeout(1_000) {
+            manager.stop()
+        }
+
+        assertTrue(audioCapture.stopInvoked)
         assertEquals(SessionState.Idle, manager.state.value)
         manager.release()
     }
@@ -354,6 +376,37 @@ private class StubAudioCapture(private val frameFlow: Flow<AudioFrame>) : AudioC
     override fun frames(): Flow<AudioFrame> = frameFlow
     override suspend fun start() {}
     override suspend fun stop() {}
+}
+
+private class StopSensitiveAudioCapture : AudioCapture {
+    private val stopSignal = CompletableDeferred<Unit>()
+
+    override var isCapturing: Boolean = false
+        private set
+
+    var stopInvoked: Boolean = false
+        private set
+
+    override fun frames(): Flow<AudioFrame> = flow {
+        isCapturing = true
+        try {
+            emit(AudioFrame(ShortArray(512), 16_000, 0L))
+            try {
+                awaitCancellation()
+            } finally {
+                stopSignal.await()
+            }
+        } finally {
+            isCapturing = false
+        }
+    }
+
+    override suspend fun start() = Unit
+
+    override suspend fun stop() {
+        stopInvoked = true
+        stopSignal.complete(Unit)
+    }
 }
 
 private class StubSegmenter(private val segments: List<SpeechSegment>) : SpeechSegmenter {

@@ -15,8 +15,16 @@ class MicrophoneCapture(
     private val frameSize: Int = FRAME_SIZE
 ) : AudioCapture {
 
+    private val recorderLock = Any()
+
     override var isCapturing: Boolean = false
         private set
+
+    @Volatile
+    private var activeRecorder: AudioRecord? = null
+
+    @Volatile
+    private var stopRequested: Boolean = false
 
     override fun frames(): Flow<AudioFrame> = flow {
         val bufferSize = maxOf(
@@ -30,29 +38,63 @@ class MicrophoneCapture(
             ENCODING,
             bufferSize
         )
+        if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+            recorder.release()
+            throw IllegalStateException("Microphone failed to initialize")
+        }
+        synchronized(recorderLock) {
+            activeRecorder = recorder
+        }
         recorder.startRecording()
         isCapturing = true
         try {
             val buffer = ShortArray(frameSize)
-            while (coroutineContext.isActive) {
+            while (coroutineContext.isActive && !stopRequested) {
                 val read = recorder.read(buffer, 0, frameSize)
-                if (read > 0) {
-                    emit(AudioFrame(buffer.copyOf(read), sampleRate, System.currentTimeMillis()))
+                if (stopRequested) break
+                when {
+                    read > 0 -> {
+                        emit(AudioFrame(buffer.copyOf(read), sampleRate, System.currentTimeMillis()))
+                    }
+                    read == 0 -> Unit
+                    read == AudioRecord.ERROR_DEAD_OBJECT -> break
+                    read < 0 -> {
+                        throw IllegalStateException("Microphone read failed with code $read")
+                    }
                 }
             }
         } finally {
-            recorder.stop()
+            synchronized(recorderLock) {
+                if (activeRecorder === recorder) {
+                    activeRecorder = null
+                }
+            }
+            safeStop(recorder)
             recorder.release()
             isCapturing = false
+            stopRequested = false
         }
     }.flowOn(Dispatchers.IO)
 
     override suspend fun start() {
-        // Managed by the flow collector
+        stopRequested = false
     }
 
     override suspend fun stop() {
-        // Cancelling the collection scope stops the flow
+        stopRequested = true
+        val recorder = synchronized(recorderLock) { activeRecorder }
+        safeStop(recorder)
+    }
+
+    private fun safeStop(recorder: AudioRecord?) {
+        if (recorder == null) return
+        try {
+            if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                recorder.stop()
+            }
+        } catch (_: IllegalStateException) {
+            // The recorder may already be stopping or released from another shutdown path.
+        }
     }
 
     companion object {
