@@ -44,6 +44,29 @@ class RollingTranscriptWpmCalculatorTest {
     }
 
     @Test
+    fun `transcript preview retains earlier finalized text for scrolling history`() {
+        val calculator = RollingTranscriptWpmCalculator(windowMs = 60_000)
+
+        repeat(8) { index ->
+            calculator.onUpdate(
+                TranscriptUpdate(
+                    text = "segment$index keeps accumulating transcript history",
+                    stability = TranscriptStability.Final,
+                    receivedAtMs = 1_000L * (index + 1)
+                )
+            )
+        }
+
+        val snapshot = calculator.onUpdate(
+            TranscriptUpdate("latest partial words", TranscriptStability.Partial, 9_500)
+        )
+
+        assertTrue(snapshot.transcriptPreview.contains("segment0 keeps accumulating transcript history"))
+        assertTrue(snapshot.transcriptPreview.contains("segment7 keeps accumulating transcript history"))
+        assertTrue(snapshot.transcriptPreview.contains("[latest partial words]"))
+    }
+
+    @Test
     fun `words outside window are evicted`() {
         val calculator = RollingTranscriptWpmCalculator(windowMs = 5_000)
 

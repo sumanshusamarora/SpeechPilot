@@ -7,7 +7,7 @@ import kotlin.math.max
  * Builds a rolling transcript and computes transcript-derived WPM from finalized words.
  *
  * WPM only counts words from final hypotheses. Partial hypotheses are shown in the transcript
- * preview but excluded from counts to avoid over-counting revised interim text.
+ * surface text but excluded from counts to avoid over-counting revised interim text.
  *
  * ## Chunk-based WPM hold
  *
@@ -129,14 +129,13 @@ class RollingTranscriptWpmCalculator(
         }
     }
 
-    private fun buildTranscriptPreview(maxChars: Int = 240): String {
+    private fun buildTranscriptPreview(): String {
         val finalized = finalizedSegments.joinToString(separator = " ")
-        val full = if (partialText.isNotBlank()) {
+        return if (partialText.isNotBlank()) {
             listOf(finalized, "[$partialText]").filter { it.isNotBlank() }.joinToString(" ")
         } else {
             finalized
         }
-        return if (full.length <= maxChars) full else full.takeLast(maxChars)
     }
 
     private fun evictOld(nowMs: Long) {
