@@ -1,5 +1,7 @@
 package com.speechpilot.modelmanager
 
+import java.io.File
+
 /**
  * Registry of on-device model descriptors recognised by the app.
  *
@@ -31,29 +33,58 @@ object KnownModels {
     )
 
     /**
-     * Whisper.cpp ggml-small English STT model (~466 MB).
+     * Whisper.cpp ggml-tiny.en English STT model (~75 MB).
      *
-     * Required by the Whisper.cpp transcription backend. The model is a single binary file
-     * downloaded directly from HuggingFace — no extraction step is needed.
+     * This English-only model is fast enough for live mobile transcription while still providing
+     * usable transcript quality for pace coaching.
      *
-     * Installed at: `filesDir/whisper/ggml-small.bin`
+     * Installed at: `filesDir/whisper/ggml-tiny.en.bin`
      *
      * Download source: https://huggingface.co/ggerganov/whisper.cpp
      */
-    val WHISPER_GGML_SMALL = LocalModelDescriptor(
-        id = "whisper-ggml-small",
+    val WHISPER_GGML_TINY_EN = LocalModelDescriptor(
+        id = "whisper-ggml-tiny-en",
         type = ModelType.STT,
-        purpose = "On-device English speech recognition (Whisper.cpp, ggml-small)",
-        displayName = "Whisper small (ggml)",
-        approxSizeMb = 466,
-        wifiRecommended = true,
-        downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        purpose = "On-device English speech recognition (Whisper.cpp, ggml-tiny.en)",
+        displayName = "Whisper tiny.en (ggml)",
+        approxSizeMb = 75,
+        wifiRecommended = false,
+        downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
         installDirName = "whisper",
         archiveRootDir = "",
-        singleFileName = "ggml-small.bin",
-        version = "ggml-small",
+        singleFileName = "ggml-tiny.en.bin",
+        version = "ggml-tiny.en",
         archiveFormat = ModelArchiveFormat.SINGLE_FILE,
     )
+
+    /**
+     * Backwards-compatible alias used by older code/tests that still reference the previous
+     * Whisper descriptor symbol.
+     */
+    @Deprecated(
+        message = "Use WHISPER_GGML_TINY_EN",
+        replaceWith = ReplaceWith("WHISPER_GGML_TINY_EN")
+    )
+    val WHISPER_GGML_SMALL: LocalModelDescriptor = WHISPER_GGML_TINY_EN
+
+    /**
+     * Returns the Whisper model file to use at runtime.
+     *
+     * Preference order:
+     * 1. `ggml-tiny.en.bin` (new default, suitable for live mobile transcription)
+     * 2. `ggml-small.bin` (legacy installs only)
+     * 3. `ggml-tiny.en.bin` target path (when provisioning is still pending)
+     */
+    fun preferredWhisperModelFile(filesDir: File): File {
+        val installDir = File(filesDir, WHISPER_GGML_TINY_EN.installDirName)
+        val preferred = File(installDir, WHISPER_GGML_TINY_EN.singleFileName)
+        val legacy = File(installDir, LEGACY_WHISPER_GGML_SMALL_FILE_NAME)
+        return when {
+            preferred.isFile -> preferred
+            legacy.isFile -> legacy
+            else -> preferred
+        }
+    }
 
     // Future: Gemma 4 E2B (LLM) — uncomment and fill in when implementing Gemma support.
     // val GEMMA_4_E2B = LocalModelDescriptor(
@@ -68,5 +99,7 @@ object KnownModels {
     // )
 
     /** All registered model descriptors. Consumed by [DefaultLocalModelManager] at init. */
-    val all: List<LocalModelDescriptor> = listOf(VOSK_SMALL_EN_US, WHISPER_GGML_SMALL)
+    val all: List<LocalModelDescriptor> = listOf(VOSK_SMALL_EN_US, WHISPER_GGML_TINY_EN)
+
+    private const val LEGACY_WHISPER_GGML_SMALL_FILE_NAME = "ggml-small.bin"
 }

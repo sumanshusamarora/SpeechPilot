@@ -23,7 +23,6 @@ import com.speechpilot.transcription.RoutingLocalTranscriber
 import com.speechpilot.transcription.VoskLocalTranscriber
 import com.speechpilot.transcription.WhisperCppLocalTranscriber
 import com.speechpilot.transcription.WhisperNative
-import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -116,7 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Used both for provisioning and for surfacing model metadata in the UI.
      */
     private fun activeModelDescriptor(prefs: UserPreferences): LocalModelDescriptor =
-        if (prefs.preferWhisperBackend) KnownModels.WHISPER_GGML_SMALL
+        if (prefs.preferWhisperBackend) KnownModels.WHISPER_GGML_TINY_EN
         else KnownModels.VOSK_SMALL_EN_US
 
     /**
@@ -167,9 +166,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val transcriber = if (prefs.transcriptionEnabled) {
             val primaryTranscriber = if (prefs.preferWhisperBackend) {
-                val whisperModelFile = File(
-                    getApplication<Application>().filesDir,
-                    "${KnownModels.WHISPER_GGML_SMALL.installDirName}/${KnownModels.WHISPER_GGML_SMALL.singleFileName}"
+                val whisperModelFile = KnownModels.preferredWhisperModelFile(
+                    getApplication<Application>().filesDir
                 )
                 WhisperCppLocalTranscriber.create(whisperModelFile)
             } else {
@@ -204,9 +202,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val transcriber = if (prefs.transcriptionEnabled) {
             val primaryTranscriber = if (prefs.preferWhisperBackend) {
-                val whisperModelFile = File(
-                    getApplication<Application>().filesDir,
-                    "${KnownModels.WHISPER_GGML_SMALL.installDirName}/${KnownModels.WHISPER_GGML_SMALL.singleFileName}"
+                val whisperModelFile = KnownModels.preferredWhisperModelFile(
+                    getApplication<Application>().filesDir
                 )
                 WhisperCppLocalTranscriber.create(whisperModelFile)
             } else {

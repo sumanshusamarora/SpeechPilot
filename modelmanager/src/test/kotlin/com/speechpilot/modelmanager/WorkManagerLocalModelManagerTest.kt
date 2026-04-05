@@ -101,14 +101,14 @@ class WorkManagerLocalModelManagerTest {
     }
 
     @Test
-    fun `WHISPER_GGML_SMALL has correct metadata`() {
-        val d = KnownModels.WHISPER_GGML_SMALL
-        assertEquals("whisper-ggml-small", d.id)
+    fun `WHISPER_GGML_TINY_EN has correct metadata`() {
+        val d = KnownModels.WHISPER_GGML_TINY_EN
+        assertEquals("whisper-ggml-tiny-en", d.id)
         assertTrue("Display name should not be blank", d.displayName.isNotBlank())
-        assertTrue("Whisper model is large", d.approxSizeMb >= 400)
-        assertTrue("Wi-Fi recommended for large download", d.wifiRecommended)
+        assertTrue("Whisper tiny model should still be non-trivial", d.approxSizeMb >= 70)
+        assertFalse("Wi-Fi should not be required for the tiny model", d.wifiRecommended)
         assertEquals(ModelArchiveFormat.SINGLE_FILE, d.archiveFormat)
-        assertEquals("ggml-small.bin", d.singleFileName)
+        assertEquals("ggml-tiny.en.bin", d.singleFileName)
         assertTrue(d.downloadUrl.contains("huggingface.co"))
     }
 
@@ -116,7 +116,32 @@ class WorkManagerLocalModelManagerTest {
     fun `KnownModels all contains both registered models`() {
         val ids = KnownModels.all.map { it.id }
         assertTrue(ids.contains("vosk-model-small-en-us"))
-        assertTrue(ids.contains("whisper-ggml-small"))
+        assertTrue(ids.contains("whisper-ggml-tiny-en"))
+    }
+
+    @Test
+    fun `preferredWhisperModelFile chooses tiny model when present`() {
+        val tmpDir = createTempDir()
+        val installDir = File(tmpDir, KnownModels.WHISPER_GGML_TINY_EN.installDirName).also { it.mkdirs() }
+        val tiny = File(installDir, KnownModels.WHISPER_GGML_TINY_EN.singleFileName).apply {
+            writeBytes(byteArrayOf(1))
+        }
+        File(installDir, "ggml-small.bin").writeBytes(byteArrayOf(2))
+
+        assertEquals(tiny.absolutePath, KnownModels.preferredWhisperModelFile(tmpDir).absolutePath)
+        tmpDir.deleteRecursively()
+    }
+
+    @Test
+    fun `preferredWhisperModelFile falls back to legacy small model when needed`() {
+        val tmpDir = createTempDir()
+        val installDir = File(tmpDir, KnownModels.WHISPER_GGML_TINY_EN.installDirName).also { it.mkdirs() }
+        val legacy = File(installDir, "ggml-small.bin").apply {
+            writeBytes(byteArrayOf(2))
+        }
+
+        assertEquals(legacy.absolutePath, KnownModels.preferredWhisperModelFile(tmpDir).absolutePath)
+        tmpDir.deleteRecursively()
     }
 
     // -------------------------------------------------------------------------
@@ -126,17 +151,17 @@ class WorkManagerLocalModelManagerTest {
     @Test
     fun `workName produces distinct names for different model IDs`() {
         val n1 = ModelDownloadWorker.workName("vosk-model-small-en-us")
-        val n2 = ModelDownloadWorker.workName("whisper-ggml-small")
+        val n2 = ModelDownloadWorker.workName("whisper-ggml-tiny-en")
         assertTrue(n1 != n2)
         assertTrue(n1.contains("vosk-model-small-en-us"))
-        assertTrue(n2.contains("whisper-ggml-small"))
+        assertTrue(n2.contains("whisper-ggml-tiny-en"))
     }
 
     @Test
     fun `workName is stable across invocations`() {
         assertEquals(
-            ModelDownloadWorker.workName("whisper-ggml-small"),
-            ModelDownloadWorker.workName("whisper-ggml-small"),
+            ModelDownloadWorker.workName("whisper-ggml-tiny-en"),
+            ModelDownloadWorker.workName("whisper-ggml-tiny-en"),
         )
     }
 
@@ -150,7 +175,7 @@ class WorkManagerLocalModelManagerTest {
      *
      * The [filesDir] is used only for [isInstalledOnDisk]; no WorkManager calls are made.
      */
-    private fun buildManager(tempDir: File): WorkManagerLocalModelManager =
+    private fun buildManager(tempDir: File): WorkManagerLocalModelManagerAccessor =
         WorkManagerLocalModelManagerTestAccessor(tempDir)
 }
 

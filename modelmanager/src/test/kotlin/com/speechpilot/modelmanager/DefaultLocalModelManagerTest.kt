@@ -351,13 +351,14 @@ class DefaultLocalModelManagerTest {
     fun `installSingleFile places temp file at installDirName-slash-singleFileName`() {
         val filesDir = tempFolder.newFolder()
         val manager = makeManager(filesDir)
+        val descriptor = KnownModels.WHISPER_GGML_TINY_EN
 
-        val tempFile = File(filesDir, "whisper-ggml-small.download.tmp")
+        val tempFile = File(filesDir, "${descriptor.id}.download.tmp")
         tempFile.writeBytes("fake-model-content".toByteArray())
 
-        manager.installSingleFile(tempFile, KnownModels.WHISPER_GGML_SMALL)
+        manager.installSingleFile(tempFile, descriptor)
 
-        val expectedDest = File(filesDir, "whisper/ggml-small.bin")
+        val expectedDest = File(filesDir, "${descriptor.installDirName}/${descriptor.singleFileName}")
         assertTrue("Model binary should exist at expected path", expectedDest.exists())
         assertFalse("Temp file should be removed after install", tempFile.exists())
     }
@@ -366,19 +367,20 @@ class DefaultLocalModelManagerTest {
     fun `installSingleFile replaces existing file`() {
         val filesDir = tempFolder.newFolder()
         val manager = makeManager(filesDir)
+        val descriptor = KnownModels.WHISPER_GGML_TINY_EN
 
         // Pre-create a stale binary.
-        val installDir = File(filesDir, "whisper")
+        val installDir = File(filesDir, descriptor.installDirName)
         installDir.mkdirs()
-        val staleFile = File(installDir, "ggml-small.bin")
+        val staleFile = File(installDir, descriptor.singleFileName)
         staleFile.writeBytes("stale".toByteArray())
 
-        val tempFile = File(filesDir, "whisper-ggml-small.download.tmp")
+        val tempFile = File(filesDir, "${descriptor.id}.download.tmp")
         tempFile.writeBytes("updated-model".toByteArray())
 
-        manager.installSingleFile(tempFile, KnownModels.WHISPER_GGML_SMALL)
+        manager.installSingleFile(tempFile, descriptor)
 
-        assertEquals("updated-model", File(installDir, "ggml-small.bin").readText())
+        assertEquals("updated-model", File(installDir, descriptor.singleFileName).readText())
     }
 
     // -------------------------------------------------------------------------------------
@@ -409,7 +411,7 @@ class DefaultLocalModelManagerTest {
     private fun installFakeWhisperModel(filesDir: File) {
         val whisperDir = File(filesDir, "whisper")
         whisperDir.mkdirs()
-        File(whisperDir, "ggml-small.bin").writeBytes(ByteArray(16))
+        File(whisperDir, KnownModels.WHISPER_GGML_TINY_EN.singleFileName).writeBytes(ByteArray(16))
     }
 
     /** Creates a zip file containing [entries] (file paths with "/" suffix = directory). */
@@ -428,6 +430,6 @@ class DefaultLocalModelManagerTest {
 
     companion object {
         private const val VOSK_ID = "vosk-model-small-en-us"
-        private const val WHISPER_ID = "whisper-ggml-small"
+        private const val WHISPER_ID = "whisper-ggml-tiny-en"
     }
 }

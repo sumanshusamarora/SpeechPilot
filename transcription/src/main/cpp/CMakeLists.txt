@@ -34,6 +34,7 @@ set(WHISPER_NO_METAL      ON  CACHE BOOL "" FORCE)
 set(WHISPER_NO_ACCELERATE ON  CACHE BOOL "" FORCE)
 set(WHISPER_NO_OPENBLAS   ON  CACHE BOOL "" FORCE)
 set(WHISPER_NO_MKL        ON  CACHE BOOL "" FORCE)
+set(GGML_OPENMP           OFF CACHE BOOL "" FORCE)
 set(GGML_CUDA             OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
@@ -55,6 +56,27 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(whisper_cpp)
 
+# Android debug APKs still need optimized native inference. Without this, ggml and whisper
+# compile with Debug defaults (`-g` and no `-O*`), which makes live transcription unusably slow.
+function(speechpilot_optimize_native_target target_name)
+    if (TARGET ${target_name})
+        target_compile_options(${target_name} PRIVATE
+            -O3
+            -DNDEBUG
+            -fvisibility=hidden
+            -ffunction-sections
+            -fdata-sections
+        )
+        target_link_options(${target_name} PRIVATE
+            -Wl,--gc-sections
+            -Wl,--exclude-libs,ALL
+        )
+    endif()
+endfunction()
+
+speechpilot_optimize_native_target(ggml)
+speechpilot_optimize_native_target(whisper)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # JNI bridge shared library.
 # Function signatures must match the `external` declarations in WhisperNative.kt.
@@ -73,7 +95,16 @@ target_link_libraries(whisper_jni PRIVATE
 )
 
 target_compile_options(whisper_jni PRIVATE
+    -O3
+    -DNDEBUG
     -O2
     -fvisibility=hidden
+    -ffunction-sections
+    -fdata-sections
     -Wall
+)
+
+target_link_options(whisper_jni PRIVATE
+    -Wl,--gc-sections
+    -Wl,--exclude-libs,ALL
 )

@@ -1,5 +1,4 @@
 package com.speechpilot.transcription
-
 import com.speechpilot.audio.AudioFrame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher

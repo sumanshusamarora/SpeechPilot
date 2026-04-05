@@ -1,5 +1,4 @@
 package com.speechpilot.transcription
-
 import com.speechpilot.audio.AudioFrame
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -38,7 +37,6 @@ class RoutingLocalTranscriber(
     private val fallbackDelayMs: Long = FALLBACK_CHECK_DELAY_MS,
     dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : LocalTranscriber {
-
     private val selectionMutex = Mutex()
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
