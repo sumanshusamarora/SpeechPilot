@@ -22,7 +22,7 @@ import java.io.File
  *
  * ## Why WorkManager?
  *
- * Model downloads (especially the ~466 MB Whisper model) are long-running network operations
+ * Model downloads are long-running network operations
  * that must survive app backgrounding. WorkManager provides:
  * - Persistence across process death
  * - Network constraint enforcement (only downloads on CONNECTED networks)

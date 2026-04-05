@@ -9,8 +9,8 @@ data class UserPreferences(
     val transcriptionEnabled: Boolean = true,
     /**
      * When `true`, Whisper.cpp is used as the primary STT backend instead of Vosk.
-     * Defaults to `false` (Vosk is the default primary backend).
+     * Defaults to `true` so fresh installs provision the lighter Whisper tiny.en model.
      * Has no effect when [transcriptionEnabled] is `false`.
      */
-    val preferWhisperBackend: Boolean = false,
+    val preferWhisperBackend: Boolean = true,
 )

@@ -31,6 +31,11 @@ class UserPreferencesTest {
     }
 
     @Test
+    fun `default preferWhisperBackend is true`() {
+        assertEquals(true, UserPreferences().preferWhisperBackend)
+    }
+
+    @Test
     fun `copy updates only specified field`() {
         val base = UserPreferences()
         val updated = base.copy(targetWpm = 160)
@@ -39,6 +44,7 @@ class UserPreferencesTest {
         assertEquals(base.feedbackCooldownMs, updated.feedbackCooldownMs)
         assertEquals(base.micSampleRate, updated.micSampleRate)
         assertEquals(base.transcriptionEnabled, updated.transcriptionEnabled)
+        assertEquals(base.preferWhisperBackend, updated.preferWhisperBackend)
     }
 
     @Test
@@ -56,12 +62,14 @@ class UserPreferencesTest {
             tolerancePct = 0.20f,
             feedbackCooldownMs = 8_000L,
             micSampleRate = 44_100,
-            transcriptionEnabled = false
+            transcriptionEnabled = false,
+            preferWhisperBackend = false
         )
         assertEquals(150, prefs.targetWpm)
         assertEquals(0.20f, prefs.tolerancePct, 0.001f)
         assertEquals(8_000L, prefs.feedbackCooldownMs)
         assertEquals(44_100, prefs.micSampleRate)
         assertEquals(false, prefs.transcriptionEnabled)
+        assertEquals(false, prefs.preferWhisperBackend)
     }
 }

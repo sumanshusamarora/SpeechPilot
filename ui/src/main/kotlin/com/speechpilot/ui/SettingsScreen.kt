@@ -174,9 +174,9 @@ private fun SettingsContent(
                         )
                         Text(
                             text = if (prefs.preferWhisperBackend)
-                                "Whisper.cpp (ggml-tiny.en) is the primary STT backend. Requires ~75 MB model download. Tuned for faster live on-device English transcription."
+                                "Whisper.cpp (ggml-tiny.en) is the default primary STT backend. Requires ~75 MB model download. Tuned for faster live on-device English transcription."
                             else
-                                "Vosk is the primary STT backend. Requires ~40 MB model download. Toggle to switch to Whisper.cpp.",
+                                "Vosk is the primary STT backend. Requires ~40 MB model download. Toggle back to restore the default Whisper.cpp path.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

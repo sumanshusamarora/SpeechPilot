@@ -24,6 +24,7 @@ import com.speechpilot.transcription.VoskLocalTranscriber
 import com.speechpilot.transcription.WhisperCppLocalTranscriber
 import com.speechpilot.transcription.WhisperNative
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,7 +43,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * WorkManager-backed model manager.
      *
-     * Uses WorkManager so large downloads (e.g. 466 MB Whisper model) survive app backgrounding.
+      * Uses WorkManager so model downloads survive app backgrounding.
      * [WorkManagerLocalModelManager.startObserving] is called in [init] to wire WorkInfo updates
      * into the [StateFlow] that the UI observes.
      */
@@ -126,6 +127,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * restarted whenever preferences change (e.g. when the user switches from Vosk to Whisper).
      * This prevents inner collectors from accumulating unbounded when preferences emit repeatedly.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeActiveModelState() {
         viewModelScope.launch {
             appSettings.preferences

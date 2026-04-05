@@ -275,7 +275,7 @@ DataStore-backed user preferences. `DataStoreAppSettings` is the concrete implem
 `micSampleRate`, `transcriptionEnabled`, `preferWhisperBackend`. All data is local-only.
 
 `transcriptionEnabled` defaults to `true` — transcription is a first-class feature, on by default.
-`preferWhisperBackend` defaults to `false` — Vosk is the default primary STT backend.
+`preferWhisperBackend` defaults to `true` — Whisper tiny.en is the default primary STT backend.
 Users can change both in Settings.
 
 Settings are observed continuously by `MainViewModel`.
@@ -311,7 +311,7 @@ Supports two packaging formats:
 | Model ID | Type | Format | Description | Size | Wi-Fi |
 |---|---|---|---|---|---|
 | `vosk-model-small-en-us` | STT | ZIP | Vosk small English model | ~40 MB | Not required |
-| `whisper-ggml-small` | STT | SINGLE_FILE | Whisper.cpp ggml-small model | ~466 MB | Recommended |
+| `whisper-ggml-tiny-en` | STT | SINGLE_FILE | Whisper.cpp ggml-tiny.en model | ~75 MB | Not required |
 
 #### Storage layout
 
@@ -325,7 +325,7 @@ filesDir/
     graph/
     …
   whisper/                         ← Whisper STT model directory (auto-provisioned, SINGLE_FILE)
-    ggml-small.bin                 ← ggml model binary (readiness marker)
+    ggml-tiny.en.bin               ← ggml model binary (readiness marker)
   gemma-4-e2b/                    ← future Gemma LLM model (not yet implemented)
 ```
 
@@ -353,7 +353,7 @@ WorkManager restarts the worker automatically when the app returns and network i
 **Active-backend-only provisioning:**
 `MainViewModel` calls `ensureInstalled()` only for the model required by the currently selected backend:
 - Vosk selected → provision `vosk-model-small-en-us` only
-- Whisper selected → provision `whisper-ggml-small` only
+- Whisper selected → provision `whisper-ggml-tiny-en` only
 - Transcription disabled → no provisioning
 
 The inactive backend's model is never eagerly downloaded. Backend switching triggers a new `ensureInstalled()` call for the newly selected backend's model.

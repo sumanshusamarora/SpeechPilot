@@ -2,6 +2,7 @@ package com.speechpilot.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,10 +18,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,14 +48,20 @@ fun HistoryScreen(
     onReanalyze: (String) -> Unit = {}
 ) {
     val sessions by viewModel.sessions.collectAsState()
-    HistoryContent(sessions = sessions, onBack = onBack, onReanalyze = onReanalyze)
+    HistoryContent(
+        sessions = sessions,
+        onBack = onBack,
+        onReanalyze = onReanalyze,
+        onDelete = viewModel::deleteSession,
+    )
 }
 
 @Composable
 private fun HistoryContent(
     sessions: List<SessionRecord>,
     onBack: () -> Unit,
-    onReanalyze: (String) -> Unit
+    onReanalyze: (String) -> Unit,
+    onDelete: (Long) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -98,16 +109,66 @@ private fun HistoryContent(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(sessions) { record ->
-                    SessionSummaryCard(
-                        record = record,
-                        onReanalyze = record.audioFileUri?.let { uri ->
-                            { onReanalyze(uri) }
-                        }
-                    )
+                items(items = sessions, key = { it.id }) { record ->
+                    SwipeToDeleteSessionCard(
+                        onDelete = { onDelete(record.id) },
+                    ) {
+                        SessionSummaryCard(
+                            record = record,
+                            onReanalyze = record.audioFileUri?.let { uri ->
+                                { onReanalyze(uri) }
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToDeleteSessionCard(
+    onDelete: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                true
+            } else {
+                false
+            }
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            val showDelete = dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (showDelete) MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text(
+                    text = "Delete",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (showDelete) MaterialTheme.colorScheme.onErrorContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    ) {
+        content()
     }
 }
 

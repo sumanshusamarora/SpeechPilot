@@ -116,8 +116,8 @@ The app uses a **two-tier backend architecture** with selectable primary STT bac
 | **No-op** (`NoOpLocalTranscriber`) | Transcription disabled | Settings → Transcription turned off |
 
 **Backend selection:** The primary STT backend is selectable in **Settings → Use Whisper.cpp backend**:
-- **Off (default):** Vosk is the primary backend
-- **On:** Whisper.cpp is the primary backend
+- **Off:** Vosk is the primary backend
+- **On (default):** Whisper.cpp is the primary backend
 
 Selection is performed automatically by `RoutingLocalTranscriber` at session start:
 1. Start the selected primary backend (Vosk or Whisper.cpp)
@@ -127,16 +127,16 @@ Selection is performed automatically by `RoutingLocalTranscriber` at session sta
 
 The debug panel now shows, at minimum, the selected backend, active backend, backend fallback state/reason, model path/presence/readability/size, Whisper native-load result, native-init attempt/result, primary ready state, audio-source attachment, primary audio-frame count, Whisper buffered-sample count, chunks processed, transcript update counts, last transcript source/error, and last successful transcript timestamp. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown with the loader error detail.
 
-#### Vosk backend (default)
+#### Vosk backend
 
 - Model: `vosk-model-small-en-us` (~40 MB compressed)
 - Streaming frame-by-frame recognition with partial and final results
 - Low latency, deterministic offline
 
-#### Whisper.cpp backend
+#### Whisper.cpp backend (default)
 
-- Model: `ggml-small.bin` (~466 MB)
-- Default URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
+- Model: `ggml-tiny.en.bin` (~75 MB)
+- Default URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin`
 - Chunk-based inference: audio is buffered in **2-second windows** before running inference
 - **Final-only updates** — no streaming partial results (inherent to Whisper's design)
 - May produce better transcript quality for accented English
@@ -166,7 +166,7 @@ If the native library fails to load at runtime (e.g. unsupported ABI, corrupted 
 **No manual setup is required.** The app automatically downloads the model required by the active STT backend. Downloads are managed by **WorkManager** so they survive app backgrounding.
 
 - **Vosk selected** → provisions Vosk model only (~40 MB, no Wi-Fi required)
-- **Whisper selected** → provisions Whisper model only (~466 MB, Wi-Fi recommended)
+- **Whisper selected** → provisions Whisper model only (~75 MB, no Wi-Fi requirement)
 - **Android SR** or transcription disabled → no model download
 
 A status card on the main screen shows:
@@ -190,8 +190,8 @@ filesDir/
     conf/
     graph/
     …
-  whisper/                       ← Whisper.cpp model directory (auto-provisioned, ~466 MB)
-    ggml-small.bin               ← ggml model binary (readiness marker)
+  whisper/                       ← Whisper.cpp model directory (auto-provisioned, ~75 MB)
+    ggml-tiny.en.bin             ← ggml model binary (readiness marker)
 ```
 
 #### What transcription provides

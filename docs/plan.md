@@ -428,7 +428,7 @@ Gemma 4 E2B support in a future iteration requires only:
 
 ## Iteration 8 — Whisper.cpp Alternative STT Backend
 
-**Goal:** Add Whisper.cpp as a real on-device STT backend to enable transcript quality comparison, especially for accented English (e.g. Indian English). Use `ggml-small.bin` as the default model.
+**Goal:** Add Whisper.cpp as a real on-device STT backend to enable transcript quality comparison, especially for accented English (e.g. Indian English). Use `ggml-tiny.en.bin` as the default model.
 
 **Motivation:** Vosk transcript quality for accented English speakers is inconsistent. Whisper.cpp may provide better results. This iteration adds the backend behind the existing routing abstraction so both can be evaluated side-by-side.
 
@@ -439,10 +439,10 @@ Gemma 4 E2B support in a future iteration requires only:
   - Update `isInstalledOnDisk()` to check single-file binary existence
   - Add `installSingleFile()` helper
   - Register `WHISPER_GGML_SMALL` in `KnownModels`:
-    - Model ID: `whisper-ggml-small`
-    - File: `ggml-small.bin`
-    - URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
-    - Install path: `filesDir/whisper/ggml-small.bin`
+    - Model ID: `whisper-ggml-tiny-en`
+    - File: `ggml-tiny.en.bin`
+    - URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin`
+    - Install path: `filesDir/whisper/ggml-tiny.en.bin`
 - [x] **Add `WhisperCpp` to `TranscriptionBackend` enum**
 - [x] **Add `WhisperNative.kt`** — JNI bridge for whisper.cpp native library
   - Attempts `System.loadLibrary("whisper")` at init; `isAvailable` flag
@@ -482,7 +482,7 @@ Gemma 4 E2B support in a future iteration requires only:
 **Remaining limitations:**
 - `libwhisper.so` is not bundled in this repo and must be compiled from source using Android NDK
 - Without the native library, the Whisper backend always reports `ModelUnavailable` and falls back to Android SR
-- Whisper ggml-small model is ~466 MB — significantly larger than Vosk (~40 MB)
+- Whisper ggml-tiny.en model is ~75 MB — larger than Vosk (~40 MB) but small enough for default provisioning
 - Chunk-based inference adds up to 5 seconds latency vs Vosk's streaming frame output
 - No WorkManager for large background downloads; Whisper model download may be interrupted if app is backgrounded
 

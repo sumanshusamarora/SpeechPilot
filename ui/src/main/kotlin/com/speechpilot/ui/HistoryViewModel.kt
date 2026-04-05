@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.speechpilot.data.RoomSessionRepository
 import com.speechpilot.data.SessionRecord
 import com.speechpilot.data.SpeechPilotDatabase
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -22,4 +23,10 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
         )
+
+    fun deleteSession(sessionId: Long) {
+        viewModelScope.launch {
+            repository.deleteById(sessionId)
+        }
+    }
 }
