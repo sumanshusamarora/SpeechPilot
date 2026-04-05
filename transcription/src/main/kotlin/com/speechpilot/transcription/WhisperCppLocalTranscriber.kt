@@ -1,4 +1,5 @@
 package com.speechpilot.transcription
+
 import com.speechpilot.audio.AudioFrame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -23,17 +24,16 @@ import java.io.File
  * On-device STT backend using Whisper.cpp.
  *
  * This backend provides an alternative to [VoskLocalTranscriber] and is intended to improve
- * transcript quality for accented English (e.g. Indian English). It uses the ggml-small model
- * by default.
+ * transcript quality for accented English (e.g. Indian English).
  *
  * ## Audio processing
  *
  * Whisper operates on fixed-size audio chunks rather than streaming frame-by-frame. PCM audio
  * frames from the shared pipeline are buffered internally, and inference is run on the accumulated
- * buffer when it reaches [chunkDurationSamples] (default: 2 seconds of audio). This means:
+ * buffer when it reaches [chunkConfig.chunkDurationSamples] (default: 2 seconds of audio). This means:
  *
  * - Transcript updates are **chunk-based and Final-only** — no partial results are emitted.
- * - There is an inherent latency of up to [chunkDurationSamples] / [SAMPLE_RATE_HZ] seconds.
+ * - There is an inherent latency of up to [chunkConfig.chunkDurationSamples] / [SAMPLE_RATE_HZ] seconds.
  * - Any remaining buffered audio is processed when the audio source ends.
  *
  * Callers observing [updates] should not expect low-latency partial-result streaming. This is
@@ -42,7 +42,7 @@ import java.io.File
  * ## Model and native library
  *
  * This backend requires:
- * 1. The ggml model binary at [modelFile] (e.g. `filesDir/whisper/ggml-small.bin`).
+ * 1. The configured ggml model binary at [modelFile] (e.g. `filesDir/whisper/ggml-tiny.en.bin`).
  * 2. The `libwhisper_jni.so` native library bundled with the APK (built via CMake FetchContent).
  *
  * If the model file is missing, [start] reports [TranscriptionEngineStatus.ModelUnavailable].
@@ -52,19 +52,22 @@ import java.io.File
  *
  * See [WhisperNative] for details on how the native library is built and packaged.
  *
- * @param modelFile Path to the ggml model binary (e.g. `filesDir/whisper/ggml-small.bin`).
+ * @param modelFile Path to the ggml model binary (e.g. `filesDir/whisper/ggml-tiny.en.bin`).
+ * @param modelId Stable model identity surfaced through diagnostics and benchmark results.
+ * @param modelDisplayName Human-readable model label surfaced through UI/debug output.
  * @param runner Abstracts the native Whisper calls; defaults to [WhisperNativeRunner]. Inject
  *   a [FakeWhisperRunner] in tests to exercise lifecycle without requiring the native library.
- * @param chunkDurationSamples How many 16 kHz PCM samples to accumulate before running
- *   inference. Default is 5 seconds (80,000 samples). Lower values reduce latency at the cost
- *   of transcription accuracy.
+ * @param chunkConfig Explicit chunk/overlap strategy. Lower chunk durations reduce latency at the
+ *   cost of transcription accuracy; overlap increases context while increasing compute cost.
  * @param clockMs Monotonic timestamp supplier; defaults to [System.currentTimeMillis].
  * @param ioDispatcher Dispatcher for inference and I/O; defaults to [Dispatchers.IO].
  */
 class WhisperCppLocalTranscriber(
     val modelFile: File,
+    val modelId: String = DEFAULT_MODEL_ID,
+    val modelDisplayName: String = DEFAULT_MODEL_DISPLAY_NAME,
     private val runner: WhisperRunner = WhisperNativeRunner(),
-    internal val chunkDurationSamples: Int = CHUNK_DURATION_SAMPLES,
+    internal val chunkConfig: WhisperChunkingConfig = WhisperChunkingConfig.LiveDefault,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : LocalTranscriber {
@@ -93,6 +96,10 @@ class WhisperCppLocalTranscriber(
             TranscriptionDiagnostics(
                 selectedBackend = backend,
                 activeBackend = backend,
+                selectedModelId = modelId,
+                selectedModelDisplayName = modelDisplayName,
+                activeModelId = modelId,
+                activeModelDisplayName = modelDisplayName,
                 modelPath = modelFile.absolutePath,
                 modelFilePresent = modelSnapshot.present,
                 modelFileReadable = modelSnapshot.readable,
@@ -100,6 +107,8 @@ class WhisperCppLocalTranscriber(
                 nativeLibraryName = WhisperNative.LIBRARY_NAME,
                 nativeLibraryLoaded = runner.isAvailable,
                 nativeLibraryLoadError = WhisperNative.loadErrorMessage,
+                chunkDurationMs = chunkConfig.chunkDurationMs,
+                chunkOverlapMs = chunkConfig.overlapDurationMs,
             )
         }
     )
@@ -123,6 +132,10 @@ class WhisperCppLocalTranscriber(
         val modelSnapshot = currentModelSnapshot()
         _status.value = TranscriptionEngineStatus.InitializingModel
         _diagnostics.value = _diagnostics.value.copy(
+            selectedModelId = modelId,
+            selectedModelDisplayName = modelDisplayName,
+            activeModelId = modelId,
+            activeModelDisplayName = modelDisplayName,
             selectedBackendStatus = TranscriptionEngineStatus.InitializingModel,
             activeBackendStatus = TranscriptionEngineStatus.InitializingModel,
             fallbackBackendStatus = TranscriptionEngineStatus.Disabled,
@@ -140,10 +153,23 @@ class WhisperCppLocalTranscriber(
             selectedBackendReady = false,
             selectedBackendAudioFramesReceived = 0,
             selectedBackendBufferedSamples = 0,
+            chunkDurationMs = chunkConfig.chunkDurationMs,
+            chunkOverlapMs = chunkConfig.overlapDurationMs,
             chunksProcessed = 0,
             selectedBackendTranscriptUpdatesEmitted = 0,
             fallbackTranscriptUpdatesEmitted = 0,
             totalTranscriptUpdatesEmitted = 0,
+            audioInputSampleRateHz = null,
+            audioOutputSampleRateHz = SAMPLE_RATE_HZ,
+            audioResampledToTarget = false,
+            audioPeakAbsAmplitude = 0f,
+            audioAverageAbsAmplitude = 0f,
+            audioClippedSampleCount = 0L,
+            audioDurationMs = 0L,
+            timeToFirstTranscriptMs = null,
+            timeToFirstFinalLikeUpdateMs = null,
+            averageChunkInferenceLatencyMs = null,
+            totalProcessingTimeMs = null,
             lastTranscriptSource = TranscriptionBackend.None,
             lastTranscriptError = null,
             lastSuccessfulTranscriptAtMs = null,
@@ -219,6 +245,7 @@ class WhisperCppLocalTranscriber(
             nativeInitContextPointer = null,
             selectedBackendReady = false,
             selectedBackendBufferedSamples = 0,
+            totalProcessingTimeMs = _diagnostics.value.totalProcessingTimeMs,
         )
     }
 
@@ -251,10 +278,9 @@ class WhisperCppLocalTranscriber(
      * Inference loop. Called only when [isModelAvailable] returns `true` and
      * [WhisperRunner.isAvailable] is `true`.
      *
-     * Collects PCM frames from [audioSource], converts them to normalized float PCM, and
-     * accumulates them in a buffer. When the buffer reaches [chunkDurationSamples], Whisper
-     * inference is run on the accumulated audio and any recognized text is emitted as a
-     * [TranscriptStability.Final] update.
+     * Collects PCM frames from [audioSource], applies the same mono/16 kHz preprocessing used by
+     * benchmark runs, and accumulates them according to [chunkConfig]. Any recognized text is
+     * emitted as a [TranscriptStability.Final] update.
      */
     private suspend fun runInference() {
         val source = audioSource ?: run {
@@ -273,10 +299,12 @@ class WhisperCppLocalTranscriber(
             return
         }
         withContext(ioDispatcher) {
-            val buffer = ArrayList<Float>(chunkDurationSamples)
+            val accumulator = WhisperAudioChunkAccumulator(chunkConfig)
             var ctx = INVALID_CTX
             var framesReceived = 0L
             var chunksProcessed = 0
+            var totalInferenceLatencyMs = 0L
+            val runStartedAtMs = clockMs()
 
             try {
                 val modelSnapshot = currentModelSnapshot()
@@ -315,6 +343,7 @@ class WhisperCppLocalTranscriber(
                     activeBackendStatus = TranscriptionEngineStatus.Listening,
                     selectedBackendInitSucceeded = true,
                     selectedBackendReady = true,
+                    totalProcessingTimeMs = 0L,
                     lastTranscriptError = null,
                 )
 
@@ -323,29 +352,73 @@ class WhisperCppLocalTranscriber(
                     if (!shouldRun) return@collect
                     framesReceived++
 
-                    // Convert 16-bit PCM to normalized float (range [-1.0, 1.0]).
-                    for (sample in frame.samples) {
-                        buffer.add(sample.toFloat() / SHORT_MAX_FLOAT)
-                    }
+                    val chunks = accumulator.appendFrame(frame)
+                    val audioReport = accumulator.buildAudioReport()
 
                     if (framesReceived == 1L || framesReceived % DIAGNOSTIC_FRAME_UPDATE_INTERVAL == 0L) {
                         _diagnostics.value = _diagnostics.value.copy(
                             selectedBackendAudioFramesReceived = framesReceived,
-                            selectedBackendBufferedSamples = buffer.size,
+                            selectedBackendBufferedSamples = accumulator.bufferedSampleCount,
+                            audioInputSampleRateHz = audioReport.inputSampleRateHz,
+                            audioOutputSampleRateHz = audioReport.outputSampleRateHz,
+                            audioResampledToTarget = audioReport.resampledToTarget,
+                            audioPeakAbsAmplitude = audioReport.peakAbsAmplitude,
+                            audioAverageAbsAmplitude = audioReport.averageAbsAmplitude,
+                            audioClippedSampleCount = audioReport.clippedSampleCount,
+                            audioDurationMs = audioReport.audioDurationMs,
                         )
                     }
 
-                    if (buffer.size >= chunkDurationSamples) {
+                    chunks.forEach { chunkSamples ->
                         chunksProcessed++
-                        processChunk(ctx, buffer.toFloatArray(), chunksProcessed, framesReceived)
-                        buffer.clear()
+                        val outcome = processChunk(
+                            ctx = ctx,
+                            samples = chunkSamples,
+                            chunksProcessed = chunksProcessed,
+                            framesReceived = framesReceived,
+                            bufferedSamples = accumulator.bufferedSampleCount,
+                            runStartedAtMs = runStartedAtMs,
+                        )
+                        totalInferenceLatencyMs += outcome.inferenceLatencyMs
+                        _diagnostics.value = _diagnostics.value.copy(
+                            averageChunkInferenceLatencyMs =
+                                totalInferenceLatencyMs.toDouble() / chunksProcessed,
+                            totalProcessingTimeMs = clockMs() - runStartedAtMs,
+                        )
                     }
                 }
 
                 // Process any remaining buffered audio when the stream ends.
-                if (shouldRun && buffer.isNotEmpty()) {
-                    chunksProcessed++
-                    processChunk(ctx, buffer.toFloatArray(), chunksProcessed, framesReceived)
+                if (shouldRun) {
+                    accumulator.finish().forEach { remainingSamples ->
+                        chunksProcessed++
+                        val outcome = processChunk(
+                            ctx = ctx,
+                            samples = remainingSamples,
+                            chunksProcessed = chunksProcessed,
+                            framesReceived = framesReceived,
+                            bufferedSamples = accumulator.bufferedSampleCount,
+                            runStartedAtMs = runStartedAtMs,
+                        )
+                        totalInferenceLatencyMs += outcome.inferenceLatencyMs
+                    }
+                    val audioReport = accumulator.buildAudioReport()
+                    _diagnostics.value = _diagnostics.value.copy(
+                        selectedBackendBufferedSamples = accumulator.bufferedSampleCount,
+                        audioInputSampleRateHz = audioReport.inputSampleRateHz,
+                        audioOutputSampleRateHz = audioReport.outputSampleRateHz,
+                        audioResampledToTarget = audioReport.resampledToTarget,
+                        audioPeakAbsAmplitude = audioReport.peakAbsAmplitude,
+                        audioAverageAbsAmplitude = audioReport.averageAbsAmplitude,
+                        audioClippedSampleCount = audioReport.clippedSampleCount,
+                        audioDurationMs = audioReport.audioDurationMs,
+                        averageChunkInferenceLatencyMs = if (chunksProcessed > 0) {
+                            totalInferenceLatencyMs.toDouble() / chunksProcessed
+                        } else {
+                            null
+                        },
+                        totalProcessingTimeMs = clockMs() - runStartedAtMs,
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -390,37 +463,56 @@ class WhisperCppLocalTranscriber(
         samples: FloatArray,
         chunksProcessed: Int,
         framesReceived: Long,
-    ) {
-        val segments = runner.transcribe(ctx, samples)
-        val text = segments.joinToString(" ").trim()
+        bufferedSamples: Int,
+        runStartedAtMs: Long,
+    ): WhisperInferenceOutcome {
+        val outcome = runWhisperInferenceChunk(runner, ctx, samples, clockMs)
         _diagnostics.value = _diagnostics.value.copy(
             selectedBackendAudioFramesReceived = framesReceived,
-            selectedBackendBufferedSamples = 0,
+            selectedBackendBufferedSamples = bufferedSamples,
             chunksProcessed = chunksProcessed,
+            totalProcessingTimeMs = clockMs() - runStartedAtMs,
         )
-        if (text.isNotEmpty()) {
+        if (outcome.runtimeError != null && outcome.text.isBlank()) {
+            _diagnostics.value = _diagnostics.value.copy(
+                lastTranscriptError = TranscriptionFailure(
+                    code = "whisper-runtime-error",
+                    message = outcome.runtimeError,
+                )
+            )
+        }
+        if (outcome.text.isNotEmpty()) {
             val timestamp = clockMs()
+            val currentDiagnostics = _diagnostics.value
             _diagnostics.value = _diagnostics.value.copy(
                 selectedBackendTranscriptUpdatesEmitted =
-                    _diagnostics.value.selectedBackendTranscriptUpdatesEmitted + 1,
-                totalTranscriptUpdatesEmitted = _diagnostics.value.totalTranscriptUpdatesEmitted + 1,
+                    currentDiagnostics.selectedBackendTranscriptUpdatesEmitted + 1,
+                totalTranscriptUpdatesEmitted = currentDiagnostics.totalTranscriptUpdatesEmitted + 1,
+                timeToFirstTranscriptMs = currentDiagnostics.timeToFirstTranscriptMs
+                    ?: (timestamp - runStartedAtMs),
+                timeToFirstFinalLikeUpdateMs = currentDiagnostics.timeToFirstFinalLikeUpdateMs
+                    ?: (timestamp - runStartedAtMs),
                 lastTranscriptSource = backend,
                 lastSuccessfulTranscriptAtMs = timestamp,
                 lastTranscriptError = null,
             )
             _updates.emit(
                 TranscriptUpdate(
-                    text = text,
+                    text = outcome.text,
                     stability = TranscriptStability.Final,
                     receivedAtMs = timestamp,
                 )
             )
         }
+        return outcome
     }
 
     companion object {
         /** Audio sample rate expected by Whisper. */
         const val SAMPLE_RATE_HZ = 16_000
+        const val DEFAULT_MODEL_ID = "whisper-ggml-tiny-en"
+        const val DEFAULT_MODEL_DISPLAY_NAME = "Whisper tiny.en (ggml)"
+        const val DEFAULT_CHUNK_DURATION_MS = 2_000L
 
         /**
          * Default number of PCM samples to accumulate before running inference.
@@ -428,17 +520,25 @@ class WhisperCppLocalTranscriber(
          *
          * 2 seconds is a practical balance between transcript latency and recognition accuracy.
          * Lower values (< 1 s) reduce accuracy; higher values (5 s+) feel unresponsive during
-         * live coaching. Inject a custom [chunkDurationSamples] to override for testing.
+         * live coaching.
          */
         const val CHUNK_DURATION_SAMPLES = SAMPLE_RATE_HZ * 2
         private const val DIAGNOSTIC_FRAME_UPDATE_INTERVAL = 8L
 
-        private const val SHORT_MAX_FLOAT = Short.MAX_VALUE.toFloat()
         private const val INVALID_CTX = 0L
 
         /** Creates a [WhisperCppLocalTranscriber] for the given model file. */
-        fun create(modelFile: File): WhisperCppLocalTranscriber =
-            WhisperCppLocalTranscriber(modelFile = modelFile)
+        fun create(
+            modelFile: File,
+            modelId: String = DEFAULT_MODEL_ID,
+            modelDisplayName: String = DEFAULT_MODEL_DISPLAY_NAME,
+            chunkConfig: WhisperChunkingConfig = WhisperChunkingConfig.LiveDefault,
+        ): WhisperCppLocalTranscriber = WhisperCppLocalTranscriber(
+            modelFile = modelFile,
+            modelId = modelId,
+            modelDisplayName = modelDisplayName,
+            chunkConfig = chunkConfig,
+        )
     }
 }
 

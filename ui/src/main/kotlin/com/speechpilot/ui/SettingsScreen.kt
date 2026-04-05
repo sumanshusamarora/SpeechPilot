@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -45,6 +47,7 @@ fun SettingsScreen(
         onFeedbackCooldownChange = viewModel::updateFeedbackCooldownMs,
         onTranscriptionChange = viewModel::updateTranscriptionEnabled,
         onPreferWhisperChange = viewModel::updatePreferWhisperBackend,
+        onWhisperModelChange = viewModel::updateWhisperModelId,
         onBack = onBack
     )
 }
@@ -57,6 +60,7 @@ private fun SettingsContent(
     onFeedbackCooldownChange: (Long) -> Unit,
     onTranscriptionChange: (Boolean) -> Unit,
     onPreferWhisperChange: (Boolean) -> Unit,
+    onWhisperModelChange: (String) -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -187,6 +191,87 @@ private fun SettingsContent(
                     )
                 }
             }
+
+            if (prefs.preferWhisperBackend) {
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Whisper model",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Choose the on-device Whisper variant used for live and file analysis. Tiny is faster; base is the benchmark quality comparison path.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            WhisperModelButton(
+                                modifier = Modifier.weight(1f),
+                                label = "tiny.en",
+                                helper = "~75 MB · fastest",
+                                selected = prefs.whisperModelId == "whisper-ggml-tiny-en",
+                                onClick = { onWhisperModelChange("whisper-ggml-tiny-en") }
+                            )
+                            WhisperModelButton(
+                                modifier = Modifier.weight(1f),
+                                label = "base.en",
+                                helper = "~142 MB · higher quality",
+                                selected = prefs.whisperModelId == "whisper-ggml-base-en",
+                                onClick = { onWhisperModelChange("whisper-ggml-base-en") }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhisperModelButton(
+    label: String,
+    helper: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = label, color = contentColor)
+            Text(
+                text = helper,
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor,
+            )
         }
     }
 }

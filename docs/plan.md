@@ -514,7 +514,8 @@ Gemma 4 E2B support in a future iteration requires only:
 - [x] **Model metadata** (`modelmanager/LocalModelDescriptor`)
   - Added `displayName: String`, `approxSizeMb: Int`, `wifiRecommended: Boolean`
   - `KnownModels.VOSK_SMALL_EN_US`: displayName="Vosk small (en-US)", approxSizeMb=40, wifiRecommended=false
-  - `KnownModels.WHISPER_GGML_SMALL`: displayName="Whisper small (ggml)", approxSizeMb=466, wifiRecommended=true
+  - `KnownModels.WHISPER_GGML_TINY_EN`: displayName="Whisper tiny.en (ggml)", approxSizeMb=75, wifiRecommended=false
+  - `KnownModels.WHISPER_GGML_BASE_EN`: displayName="Whisper base.en (ggml)", approxSizeMb=142, wifiRecommended=true
 
 - [x] **WorkManager provisioning** (`modelmanager`)
   - Added `work-runtime-ktx:2.9.1` to `libs.versions.toml` and `modelmanager/build.gradle.kts`
@@ -552,7 +553,51 @@ Gemma 4 E2B support in a future iteration requires only:
 - Downloads are not resumable (partial temp file deleted; download restarts from zero)
 - No automatic retry on transient failure — user must press Retry
 - First CMake build requires network to fetch whisper.cpp source (~100 MB)
-- Whisper inference on the `small` model is CPU-only (no GPU/Metal acceleration) — may be slow on low-end devices
+- Whisper inference is CPU-only (no GPU/Metal acceleration) — larger models may be slow on low-end devices
+
+
+---
+
+## Phase 2 — Whisper Benchmarking and Preprocessing Instrumentation (iteration 3)
+
+**Goal:** Compare Whisper tiny/base behavior fairly, expose chunking tradeoffs, and surface preprocessing/timing evidence without destabilizing live microphone sessions.
+
+### Changes
+
+- [x] **Selectable Whisper models** (`settings`, `ui`, `modelmanager`)
+  - Persisted `whisperModelId` in `UserPreferences` / `DataStoreAppSettings`
+  - `SettingsScreen` now exposes `tiny.en` and `base.en` selection when Whisper is enabled
+  - `MainViewModel` provisions and activates the exact selected Whisper descriptor
+
+- [x] **Shared Whisper preprocessing and chunking** (`transcription`)
+  - Added `WhisperChunkingConfig`, `WhisperAudioChunkAccumulator`, `WhisperAudioInputReport`, and `runWhisperInferenceChunk(...)`
+  - Live Whisper and file benchmarks now share the same normalization, resampling, chunk, and overlap logic
+  - Fixed a concrete preprocessing bug: file audio with non-16 kHz sample rates is now resampled before Whisper inference instead of being treated as already 16 kHz
+
+- [x] **Benchmark harness and UI** (`transcription`, `ui`)
+  - Added `WhisperBenchmarkRunner`, `WhisperBenchmarkConfig`, `WhisperBenchmarkReport`, `WhisperBenchmarkResult`
+  - Added main-screen benchmark launcher/report cards for file-based comparison runs
+  - Benchmark matrix currently compares tiny/base across the live default chunking and a longer-context overlap strategy
+
+- [x] **Expanded diagnostics** (`transcription`, `ui`)
+  - `TranscriptionDiagnostics` now includes selected/active model identity, chunk duration/overlap, preprocessing metrics, and timing metrics
+  - `RoutingLocalTranscriber` preserves those details across primary/fallback routing
+
+- [x] **Tests**
+  - Added `WhisperBenchmarkRunnerTest`
+  - Expanded `WhisperCppLocalTranscriberTest` and model-manager coverage for the new model-selection and diagnostics paths
+
+### Architecture notes
+
+- Benchmarking is file-based and separate from live microphone sessions so production coaching behavior stays stable
+- Evidence collection is structured around the same preprocessing path used by live Whisper, which makes tiny/base and chunking comparisons defensible
+- The new diagnostics are intended for engineering evaluation and debugging, not for changing the end-user feedback policy by themselves
+
+### Known limitations
+
+- No benchmark corpus ships in-repo; real quality comparison still depends on representative local recordings
+- Benchmarks currently report transcript/timing/preprocessing evidence but do not compute WER against labeled ground truth
+- Live Whisper still uses the default 2-second chunking strategy; alternate strategies are exposed through the benchmark path first
 
 
 ---

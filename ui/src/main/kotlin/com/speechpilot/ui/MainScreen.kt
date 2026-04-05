@@ -61,6 +61,8 @@ import com.speechpilot.modelmanager.ModelInstallState
 import com.speechpilot.session.PaceSignalSource
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.TranscriptDebugStatus
+import com.speechpilot.transcription.WhisperBenchmarkReport
+import com.speechpilot.transcription.WhisperBenchmarkResult
 import com.speechpilot.transcription.TranscriptionBackend
 
 @Composable
@@ -76,15 +78,17 @@ fun MainScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    it,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: SecurityException) {
-                // Some providers do not grant persistable permissions; continue anyway.
-            }
+            persistReadPermission(context, it)
             viewModel.startFileSession(it)
+        }
+    }
+
+    val benchmarkLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            persistReadPermission(context, it)
+            viewModel.startWhisperBenchmark(it)
         }
     }
 
@@ -94,6 +98,7 @@ fun MainScreen(
         onStopSession = viewModel::stopSession,
         onDismissError = viewModel::dismissError,
         onAnalyzeFile = { fileLauncher.launch(arrayOf("audio/*")) },
+        onRunWhisperBenchmark = { benchmarkLauncher.launch(arrayOf("audio/*")) },
         onOpenSettings = onOpenSettings,
         onOpenHistory = onOpenHistory,
         onRetryModelInstall = viewModel::retryActiveModelInstall,
@@ -107,6 +112,7 @@ private fun MainContent(
     onStopSession: () -> Unit,
     onDismissError: () -> Unit,
     onAnalyzeFile: () -> Unit,
+    onRunWhisperBenchmark: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
     onRetryModelInstall: () -> Unit,
@@ -190,6 +196,20 @@ private fun MainContent(
             // falling back to Android SpeechRecognizer.
             if (state.whisperSelected && !state.whisperNativeLibLoaded) {
                 item { WhisperRuntimeWarningCard(state.transcriptDebug.diagnostics) }
+            }
+
+            if (state.transcriptionEnabled) {
+                item {
+                    WhisperBenchmarkLauncherCard(
+                        benchmarkState = state.whisperBenchmark,
+                        sessionActive = state.isSessionActive,
+                        onRunBenchmark = onRunWhisperBenchmark,
+                    )
+                }
+            }
+
+            state.whisperBenchmark.report?.let { report ->
+                item { WhisperBenchmarkReportCard(report = report) }
             }
 
             item {
@@ -456,8 +476,26 @@ private fun TranscriptCard(state: MainUiState) {
                     modifier = Modifier.weight(1f)
                 )
                 TranscriptMetaPill(
+                    label = "Model",
+                    value = state.transcriptDebug.diagnostics.activeModelDisplayName
+                        ?: state.transcriptDebug.diagnostics.selectedModelDisplayName
+                        ?: "n/a",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TranscriptMetaPill(
                     label = "Words",
                     value = state.transcriptDebug.finalizedWordCount.toString(),
+                    modifier = Modifier.weight(1f)
+                )
+                TranscriptMetaPill(
+                    label = "Chunking",
+                    value = transcriptDiagnosticsChunkLabel(state),
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -696,6 +734,8 @@ private fun DebugPanel(state: MainUiState) {
                 "Mic level" to "%.2f".format(state.micLevel),
                 "Selected backend" to backendLabel(transcriptDiagnostics.selectedBackend),
                 "Active backend" to backendLabel(transcriptDiagnostics.activeBackend),
+                "Selected model" to (transcriptDiagnostics.selectedModelDisplayName ?: "n/a"),
+                "Active model" to (transcriptDiagnostics.activeModelDisplayName ?: "n/a"),
                 "Selected backend status" to transcriptDiagnostics.selectedBackendStatus.name.lowercase(),
                 "Active backend status" to transcriptDiagnostics.activeBackendStatus.name.lowercase(),
                 "Backend fallback" to if (transcriptDiagnostics.fallbackActive) "yes" else "no",
@@ -718,10 +758,23 @@ private fun DebugPanel(state: MainUiState) {
                 "Audio source attached" to if (transcriptDiagnostics.audioSourceAttached) "yes" else "no",
                 "Audio reached primary" to if (transcriptDiagnostics.selectedBackendAudioFramesReceived > 0) "yes" else "no",
                 "Primary audio frames" to transcriptDiagnostics.selectedBackendAudioFramesReceived.toString(),
+                "Chunk duration" to (transcriptDiagnostics.chunkDurationMs?.let { "${it}ms" } ?: "n/a"),
+                "Chunk overlap" to (transcriptDiagnostics.chunkOverlapMs?.let { "${it}ms" } ?: "n/a"),
                 "Whisper buffer samples" to transcriptDiagnostics.selectedBackendBufferedSamples.toString(),
                 "Chunks processed" to transcriptDiagnostics.chunksProcessed.toString(),
+                "Input sample rate" to (transcriptDiagnostics.audioInputSampleRateHz?.let { "${it} Hz" } ?: "n/a"),
+                "Output sample rate" to (transcriptDiagnostics.audioOutputSampleRateHz?.let { "${it} Hz" } ?: "n/a"),
+                "Audio resampled" to if (transcriptDiagnostics.audioResampledToTarget) "yes" else "no",
+                "Peak amplitude" to "%.3f".format(transcriptDiagnostics.audioPeakAbsAmplitude),
+                "Avg amplitude" to "%.3f".format(transcriptDiagnostics.audioAverageAbsAmplitude),
+                "Clipped samples" to transcriptDiagnostics.audioClippedSampleCount.toString(),
+                "Audio duration" to "${transcriptDiagnostics.audioDurationMs} ms",
                 "Primary transcript updates" to transcriptDiagnostics.selectedBackendTranscriptUpdatesEmitted.toString(),
                 "Fallback transcript updates" to transcriptDiagnostics.fallbackTranscriptUpdatesEmitted.toString(),
+                "First transcript" to (transcriptDiagnostics.timeToFirstTranscriptMs?.let { "${it} ms" } ?: "none"),
+                "First final-like" to (transcriptDiagnostics.timeToFirstFinalLikeUpdateMs?.let { "${it} ms" } ?: "none"),
+                "Avg chunk latency" to (transcriptDiagnostics.averageChunkInferenceLatencyMs?.let { "%.1f ms".format(it) } ?: "n/a"),
+                "Total processing" to (transcriptDiagnostics.totalProcessingTimeMs?.let { "${it} ms" } ?: "n/a"),
                 "Last transcript source" to backendLabel(transcriptDiagnostics.lastTranscriptSource),
                 "Last transcript error" to (transcriptDiagnostics.lastTranscriptError?.message ?: "none"),
                 "Last transcript success" to (transcriptDiagnostics.lastSuccessfulTranscriptAtMs?.toString() ?: "none"),
@@ -755,6 +808,187 @@ private fun DebugPanel(state: MainUiState) {
             }
 
         }
+    }
+}
+
+@Composable
+private fun WhisperBenchmarkLauncherCard(
+    benchmarkState: WhisperBenchmarkUiState,
+    sessionActive: Boolean,
+    onRunBenchmark: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Whisper benchmark",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Runs the same local audio file through tiny.en and base.en using the current 2s chunking and a longer-context overlap strategy. Results include transcript text, timing, fallback status, and preprocessing diagnostics.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            benchmarkState.sourceLabel?.let {
+                Text(
+                    text = "Last source: $it",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            benchmarkState.errorMessage?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (benchmarkState.isRunning) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            FilledTonalButton(
+                onClick = onRunBenchmark,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !benchmarkState.isRunning && !sessionActive,
+            ) {
+                Text(
+                    if (benchmarkState.isRunning) "Running benchmark…"
+                    else if (sessionActive) "Stop session to benchmark"
+                    else "Run Whisper Benchmark"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhisperBenchmarkReportCard(report: WhisperBenchmarkReport) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Benchmark Results",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = report.sourceLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            report.results.forEach { result ->
+                WhisperBenchmarkResultCard(result = result)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhisperBenchmarkResultCard(result: WhisperBenchmarkResult) {
+    val transcriptScroll = rememberScrollState()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "${result.modelDisplayName} · ${result.strategyLabel}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            BenchmarkMetricRow("Audio duration", "${result.audioDurationMs} ms")
+            BenchmarkMetricRow("Chunking", "${result.chunkDurationMs} ms / overlap ${result.overlapDurationMs} ms")
+            BenchmarkMetricRow("Updates", result.transcriptUpdateCount.toString())
+            BenchmarkMetricRow("First transcript", result.timeToFirstTranscriptMs?.let { "${it} ms" } ?: "none")
+            BenchmarkMetricRow("First final-like", result.timeToFirstFinalLikeUpdateMs?.let { "${it} ms" } ?: "none")
+            BenchmarkMetricRow("Chunks processed", result.chunkCountProcessed.toString())
+            BenchmarkMetricRow("Avg chunk latency", result.averageInferenceLatencyMs?.let { "%.1f ms".format(it) } ?: "n/a")
+            BenchmarkMetricRow("Total processing", "${result.totalProcessingTimeMs} ms")
+            BenchmarkMetricRow("Fallback", if (result.fallbackOccurred) "yes" else "no")
+            BenchmarkMetricRow("Input sample rate", result.preprocessing.inputSampleRateHz?.let { "${it} Hz" } ?: "n/a")
+            BenchmarkMetricRow("Resampled", if (result.preprocessing.resampledToTarget) "yes" else "no")
+            BenchmarkMetricRow("Peak amplitude", "%.3f".format(result.preprocessing.peakAbsAmplitude))
+            BenchmarkMetricRow("Avg amplitude", "%.3f".format(result.preprocessing.averageAbsAmplitude))
+            BenchmarkMetricRow("Clipped samples", result.preprocessing.clippedSampleCount.toString())
+            result.runtimeError?.let {
+                Text(
+                    text = "Runtime error: $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            SelectionContainer {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp, max = 220.dp)
+                        .verticalScroll(transcriptScroll)
+                        .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(14.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = if (result.transcriptText.isBlank()) "No transcript output." else result.transcriptText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BenchmarkMetricRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = value, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+private fun transcriptDiagnosticsChunkLabel(state: MainUiState): String {
+    val diagnostics = state.transcriptDebug.diagnostics
+    val chunk = diagnostics.chunkDurationMs ?: return "n/a"
+    val overlap = diagnostics.chunkOverlapMs ?: 0L
+    return if (overlap > 0L) {
+        "${chunk}ms / ${overlap}ms"
+    } else {
+        "${chunk}ms"
+    }
+}
+
+private fun persistReadPermission(context: android.content.Context, uri: android.net.Uri) {
+    try {
+        context.contentResolver.takePersistableUriPermission(
+            uri,
+            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+        )
+    } catch (_: SecurityException) {
+        // Some providers do not grant persistable permissions; continue anyway.
     }
 }
 

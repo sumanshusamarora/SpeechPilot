@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -46,6 +47,7 @@ class DataStoreAppSettings(context: Context) : AppSettings {
                 micSampleRate = store[Keys.MIC_SAMPLE_RATE] ?: defaults.micSampleRate,
                 transcriptionEnabled = store[Keys.TRANSCRIPTION_ENABLED] ?: defaults.transcriptionEnabled,
                 preferWhisperBackend = store[Keys.PREFER_WHISPER_BACKEND] ?: defaults.preferWhisperBackend,
+                whisperModelId = store[Keys.WHISPER_MODEL_ID] ?: defaults.whisperModelId,
             )
         }
 
@@ -57,6 +59,7 @@ class DataStoreAppSettings(context: Context) : AppSettings {
             store[Keys.MIC_SAMPLE_RATE] = prefs.micSampleRate
             store[Keys.TRANSCRIPTION_ENABLED] = prefs.transcriptionEnabled
             store[Keys.PREFER_WHISPER_BACKEND] = prefs.preferWhisperBackend
+            store[Keys.WHISPER_MODEL_ID] = prefs.whisperModelId
         }
     }
 
@@ -67,5 +70,6 @@ class DataStoreAppSettings(context: Context) : AppSettings {
         val MIC_SAMPLE_RATE = intPreferencesKey("mic_sample_rate")
         val TRANSCRIPTION_ENABLED = booleanPreferencesKey("transcription_enabled")
         val PREFER_WHISPER_BACKEND = booleanPreferencesKey("prefer_whisper_backend")
+        val WHISPER_MODEL_ID = stringPreferencesKey("whisper_model_id")
     }
 }

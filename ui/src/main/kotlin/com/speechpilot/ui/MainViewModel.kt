@@ -2,6 +2,7 @@ package com.speechpilot.ui
 
 import android.app.Application
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.speechpilot.data.RoomSessionRepository
@@ -21,6 +22,9 @@ import com.speechpilot.transcription.AndroidSpeechRecognizerTranscriber
 import com.speechpilot.transcription.NoOpLocalTranscriber
 import com.speechpilot.transcription.RoutingLocalTranscriber
 import com.speechpilot.transcription.VoskLocalTranscriber
+import com.speechpilot.transcription.WhisperBenchmarkConfig
+import com.speechpilot.transcription.WhisperBenchmarkRunner
+import com.speechpilot.transcription.WhisperChunkingConfig
 import com.speechpilot.transcription.WhisperCppLocalTranscriber
 import com.speechpilot.transcription.WhisperNative
 import kotlinx.coroutines.Job
@@ -43,11 +47,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * WorkManager-backed model manager.
      *
-      * Uses WorkManager so model downloads survive app backgrounding.
+        * Uses WorkManager so model downloads survive app backgrounding.
      * [WorkManagerLocalModelManager.startObserving] is called in [init] to wire WorkInfo updates
      * into the [StateFlow] that the UI observes.
      */
     private val modelManager = WorkManagerLocalModelManager(getApplication())
+        private val whisperBenchmarkRunner = WhisperBenchmarkRunner()
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -116,7 +121,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Used both for provisioning and for surfacing model metadata in the UI.
      */
     private fun activeModelDescriptor(prefs: UserPreferences): LocalModelDescriptor =
-        if (prefs.preferWhisperBackend) KnownModels.WHISPER_GGML_TINY_EN
+        if (prefs.preferWhisperBackend) KnownModels.whisperDescriptor(prefs.whisperModelId)
         else KnownModels.VOSK_SMALL_EN_US
 
     /**
@@ -166,22 +171,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         liveStateJob?.cancel()
         sessionManager?.release()
 
-        val transcriber = if (prefs.transcriptionEnabled) {
-            val primaryTranscriber = if (prefs.preferWhisperBackend) {
-                val whisperModelFile = KnownModels.preferredWhisperModelFile(
-                    getApplication<Application>().filesDir
-                )
-                WhisperCppLocalTranscriber.create(whisperModelFile)
-            } else {
-                VoskLocalTranscriber.create(getApplication())
-            }
-            RoutingLocalTranscriber(
-                primaryTranscriber = primaryTranscriber,
-                fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
-            )
-        } else {
-            NoOpLocalTranscriber()
-        }
+        val transcriber = createLocalTranscriber(prefs)
 
         val mgr = SpeechCoachSessionManager.create(
             feedbackDispatcher = VibrationFeedbackDispatcher(getApplication()),
@@ -202,22 +192,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         liveStateJob?.cancel()
         sessionManager?.release()
 
-        val transcriber = if (prefs.transcriptionEnabled) {
-            val primaryTranscriber = if (prefs.preferWhisperBackend) {
-                val whisperModelFile = KnownModels.preferredWhisperModelFile(
-                    getApplication<Application>().filesDir
-                )
-                WhisperCppLocalTranscriber.create(whisperModelFile)
-            } else {
-                VoskLocalTranscriber.create(getApplication())
-            }
-            RoutingLocalTranscriber(
-                primaryTranscriber = primaryTranscriber,
-                fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
-            )
-        } else {
-            NoOpLocalTranscriber()
-        }
+        val transcriber = createLocalTranscriber(prefs)
 
         val mgr = SpeechCoachSessionManager.createForFile(
             context = getApplication(),
@@ -333,6 +308,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { mgr.start() }
     }
 
+    fun startWhisperBenchmark(uri: Uri) {
+        if (_uiState.value.isSessionActive) {
+            _uiState.update {
+                it.copy(errorMessage = "Stop the current session before running a Whisper benchmark.")
+            }
+            return
+        }
+
+        val sourceLabel = displayNameFor(uri)
+        _uiState.update {
+            it.copy(
+                whisperBenchmark = WhisperBenchmarkUiState(
+                    isRunning = true,
+                    sourceLabel = sourceLabel,
+                    report = null,
+                    errorMessage = null,
+                )
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                val report = whisperBenchmarkRunner.runComparisonForFile(
+                    context = getApplication(),
+                    audioFileUri = uri,
+                    sourceLabel = sourceLabel,
+                    configs = buildWhisperBenchmarkConfigs(),
+                )
+                val error = report.results.firstOrNull { it.runtimeError != null }?.runtimeError
+                _uiState.update {
+                    it.copy(
+                        whisperBenchmark = WhisperBenchmarkUiState(
+                            isRunning = false,
+                            sourceLabel = sourceLabel,
+                            report = report,
+                            errorMessage = error,
+                        )
+                    )
+                }
+            } catch (error: Exception) {
+                _uiState.update {
+                    it.copy(
+                        whisperBenchmark = WhisperBenchmarkUiState(
+                            isRunning = false,
+                            sourceLabel = sourceLabel,
+                            report = null,
+                            errorMessage = error.localizedMessage ?: "Benchmark run failed",
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     fun stopSession() {
         val mgr = sessionManager ?: return
         viewModelScope.launch { mgr.stop() }
@@ -347,5 +376,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         liveStateJob?.cancel()
         modelObserveJob?.cancel()
         sessionManager?.release()
+    }
+
+    private fun createLocalTranscriber(prefs: UserPreferences) = if (prefs.transcriptionEnabled) {
+        val primaryTranscriber = if (prefs.preferWhisperBackend) {
+            val descriptor = KnownModels.whisperDescriptor(prefs.whisperModelId)
+            val whisperModelFile = KnownModels.whisperModelFile(
+                getApplication<Application>().filesDir,
+                descriptor.id,
+            )
+            WhisperCppLocalTranscriber.create(
+                modelFile = whisperModelFile,
+                modelId = descriptor.id,
+                modelDisplayName = descriptor.displayName,
+                chunkConfig = WhisperChunkingConfig.LiveDefault,
+            )
+        } else {
+            VoskLocalTranscriber.create(getApplication())
+        }
+        RoutingLocalTranscriber(
+            primaryTranscriber = primaryTranscriber,
+            fallbackTranscriber = AndroidSpeechRecognizerTranscriber(getApplication())
+        )
+    } else {
+        NoOpLocalTranscriber()
+    }
+
+    private fun buildWhisperBenchmarkConfigs(): List<WhisperBenchmarkConfig> {
+        val filesDir = getApplication<Application>().filesDir
+        val strategies = listOf(
+            WhisperChunkingConfig.LiveDefault,
+            WhisperChunkingConfig.LongerContext,
+        )
+        return KnownModels.whisperModels.flatMap { descriptor ->
+            strategies.map { strategy ->
+                WhisperBenchmarkConfig(
+                    modelId = descriptor.id,
+                    modelDisplayName = descriptor.displayName,
+                    modelFile = KnownModels.whisperModelFile(filesDir, descriptor.id),
+                    chunking = strategy,
+                )
+            }
+        }
+    }
+
+    private fun displayNameFor(uri: Uri): String {
+        val resolver = getApplication<Application>().contentResolver
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) {
+                    return cursor.getString(index)
+                }
+            }
+        }
+        return uri.lastPathSegment ?: uri.toString()
     }
 }

@@ -36,6 +36,11 @@ class UserPreferencesTest {
     }
 
     @Test
+    fun `default whisperModelId is tiny`() {
+        assertEquals("whisper-ggml-tiny-en", UserPreferences().whisperModelId)
+    }
+
+    @Test
     fun `copy updates only specified field`() {
         val base = UserPreferences()
         val updated = base.copy(targetWpm = 160)
@@ -45,6 +50,7 @@ class UserPreferencesTest {
         assertEquals(base.micSampleRate, updated.micSampleRate)
         assertEquals(base.transcriptionEnabled, updated.transcriptionEnabled)
         assertEquals(base.preferWhisperBackend, updated.preferWhisperBackend)
+        assertEquals(base.whisperModelId, updated.whisperModelId)
     }
 
     @Test
@@ -63,7 +69,8 @@ class UserPreferencesTest {
             feedbackCooldownMs = 8_000L,
             micSampleRate = 44_100,
             transcriptionEnabled = false,
-            preferWhisperBackend = false
+            preferWhisperBackend = false,
+            whisperModelId = "whisper-ggml-base-en"
         )
         assertEquals(150, prefs.targetWpm)
         assertEquals(0.20f, prefs.tolerancePct, 0.001f)
@@ -71,5 +78,6 @@ class UserPreferencesTest {
         assertEquals(44_100, prefs.micSampleRate)
         assertEquals(false, prefs.transcriptionEnabled)
         assertEquals(false, prefs.preferWhisperBackend)
+        assertEquals("whisper-ggml-base-en", prefs.whisperModelId)
     }
 }

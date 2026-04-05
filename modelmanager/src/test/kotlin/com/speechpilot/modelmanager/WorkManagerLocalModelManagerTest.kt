@@ -38,7 +38,7 @@ class WorkManagerLocalModelManagerTest {
         val tmpDir = createTempDir()
         val manager = buildManager(tmpDir)
 
-        val descriptor = KnownModels.WHISPER_GGML_SMALL
+        val descriptor = KnownModels.WHISPER_GGML_TINY_EN
         val installDir = File(tmpDir, descriptor.installDirName).also { it.mkdirs() }
         File(installDir, descriptor.singleFileName).createNewFile()
 
@@ -51,7 +51,7 @@ class WorkManagerLocalModelManagerTest {
         val tmpDir = createTempDir()
         val manager = buildManager(tmpDir)
 
-        val descriptor = KnownModels.WHISPER_GGML_SMALL
+        val descriptor = KnownModels.WHISPER_GGML_TINY_EN
         File(tmpDir, descriptor.installDirName).mkdirs()
         // Do NOT create the binary file.
 
@@ -113,34 +113,43 @@ class WorkManagerLocalModelManagerTest {
     }
 
     @Test
-    fun `KnownModels all contains both registered models`() {
-        val ids = KnownModels.all.map { it.id }
-        assertTrue(ids.contains("vosk-model-small-en-us"))
-        assertTrue(ids.contains("whisper-ggml-tiny-en"))
+    fun `WHISPER_GGML_BASE_EN has correct metadata`() {
+        val d = KnownModels.WHISPER_GGML_BASE_EN
+        assertEquals("whisper-ggml-base-en", d.id)
+        assertTrue(d.displayName.isNotBlank())
+        assertTrue(d.approxSizeMb >= 140)
+        assertTrue(d.wifiRecommended)
+        assertEquals(ModelArchiveFormat.SINGLE_FILE, d.archiveFormat)
+        assertEquals("ggml-base.en.bin", d.singleFileName)
     }
 
     @Test
-    fun `preferredWhisperModelFile chooses tiny model when present`() {
-        val tmpDir = createTempDir()
-        val installDir = File(tmpDir, KnownModels.WHISPER_GGML_TINY_EN.installDirName).also { it.mkdirs() }
-        val tiny = File(installDir, KnownModels.WHISPER_GGML_TINY_EN.singleFileName).apply {
-            writeBytes(byteArrayOf(1))
-        }
-        File(installDir, "ggml-small.bin").writeBytes(byteArrayOf(2))
+    fun `KnownModels all contains registered whisper variants`() {
+        val ids = KnownModels.all.map { it.id }
+        assertTrue(ids.contains("vosk-model-small-en-us"))
+        assertTrue(ids.contains("whisper-ggml-tiny-en"))
+        assertTrue(ids.contains("whisper-ggml-base-en"))
+    }
 
-        assertEquals(tiny.absolutePath, KnownModels.preferredWhisperModelFile(tmpDir).absolutePath)
+    @Test
+    fun `whisperModelFile resolves tiny model path`() {
+        val tmpDir = createTempDir()
+        val tiny = KnownModels.whisperModelFile(tmpDir, KnownModels.WHISPER_GGML_TINY_EN.id)
+        assertEquals(
+            File(tmpDir, "whisper/ggml-tiny.en.bin").absolutePath,
+            tiny.absolutePath,
+        )
         tmpDir.deleteRecursively()
     }
 
     @Test
-    fun `preferredWhisperModelFile falls back to legacy small model when needed`() {
+    fun `whisperModelFile resolves base model path`() {
         val tmpDir = createTempDir()
-        val installDir = File(tmpDir, KnownModels.WHISPER_GGML_TINY_EN.installDirName).also { it.mkdirs() }
-        val legacy = File(installDir, "ggml-small.bin").apply {
-            writeBytes(byteArrayOf(2))
-        }
-
-        assertEquals(legacy.absolutePath, KnownModels.preferredWhisperModelFile(tmpDir).absolutePath)
+        val base = KnownModels.whisperModelFile(tmpDir, KnownModels.WHISPER_GGML_BASE_EN.id)
+        assertEquals(
+            File(tmpDir, "whisper/ggml-base.en.bin").absolutePath,
+            base.absolutePath,
+        )
         tmpDir.deleteRecursively()
     }
 

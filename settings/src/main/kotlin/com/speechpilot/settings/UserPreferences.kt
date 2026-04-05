@@ -13,4 +13,9 @@ data class UserPreferences(
      * Has no effect when [transcriptionEnabled] is `false`.
      */
     val preferWhisperBackend: Boolean = true,
+    /**
+     * Explicit Whisper model identity used by the local Whisper.cpp backend.
+     * Supported values are maintained in the app layer (`whisper-ggml-tiny-en`, `whisper-ggml-base-en`).
+     */
+    val whisperModelId: String = "whisper-ggml-tiny-en",
 )

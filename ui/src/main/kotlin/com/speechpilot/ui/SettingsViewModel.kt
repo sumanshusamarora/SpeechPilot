@@ -50,4 +50,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             appSettings.update(preferences.value.copy(preferWhisperBackend = prefer))
         }
     }
+
+    fun updateWhisperModelId(modelId: String) {
+        viewModelScope.launch {
+            appSettings.update(preferences.value.copy(whisperModelId = modelId))
+        }
+    }
 }

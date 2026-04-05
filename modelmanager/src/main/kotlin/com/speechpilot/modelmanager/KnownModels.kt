@@ -58,6 +58,27 @@ object KnownModels {
     )
 
     /**
+     * Whisper.cpp ggml-base.en English STT model (~142 MB).
+     *
+     * Intended for quality-vs-latency comparison against tiny.en on the same local pipeline.
+     * Installed at: `filesDir/whisper/ggml-base.en.bin`
+     */
+    val WHISPER_GGML_BASE_EN = LocalModelDescriptor(
+        id = "whisper-ggml-base-en",
+        type = ModelType.STT,
+        purpose = "On-device English speech recognition (Whisper.cpp, ggml-base.en)",
+        displayName = "Whisper base.en (ggml)",
+        approxSizeMb = 142,
+        wifiRecommended = true,
+        downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+        installDirName = "whisper",
+        archiveRootDir = "",
+        singleFileName = "ggml-base.en.bin",
+        version = "ggml-base.en",
+        archiveFormat = ModelArchiveFormat.SINGLE_FILE,
+    )
+
+    /**
      * Backwards-compatible alias used by older code/tests that still reference the previous
      * Whisper descriptor symbol.
      */
@@ -75,15 +96,15 @@ object KnownModels {
      * 2. `ggml-small.bin` (legacy installs only)
      * 3. `ggml-tiny.en.bin` target path (when provisioning is still pending)
      */
-    fun preferredWhisperModelFile(filesDir: File): File {
-        val installDir = File(filesDir, WHISPER_GGML_TINY_EN.installDirName)
-        val preferred = File(installDir, WHISPER_GGML_TINY_EN.singleFileName)
-        val legacy = File(installDir, LEGACY_WHISPER_GGML_SMALL_FILE_NAME)
-        return when {
-            preferred.isFile -> preferred
-            legacy.isFile -> legacy
-            else -> preferred
-        }
+    val whisperModels: List<LocalModelDescriptor> = listOf(WHISPER_GGML_TINY_EN, WHISPER_GGML_BASE_EN)
+
+    fun whisperDescriptor(modelId: String?): LocalModelDescriptor =
+        whisperModels.firstOrNull { it.id == modelId } ?: WHISPER_GGML_TINY_EN
+
+    fun whisperModelFile(filesDir: File, modelId: String?): File {
+        val descriptor = whisperDescriptor(modelId)
+        val installDir = File(filesDir, descriptor.installDirName)
+        return File(installDir, descriptor.singleFileName)
     }
 
     // Future: Gemma 4 E2B (LLM) — uncomment and fill in when implementing Gemma support.
@@ -99,7 +120,9 @@ object KnownModels {
     // )
 
     /** All registered model descriptors. Consumed by [DefaultLocalModelManager] at init. */
-    val all: List<LocalModelDescriptor> = listOf(VOSK_SMALL_EN_US, WHISPER_GGML_TINY_EN)
-
-    private const val LEGACY_WHISPER_GGML_SMALL_FILE_NAME = "ggml-small.bin"
+    val all: List<LocalModelDescriptor> = listOf(
+        VOSK_SMALL_EN_US,
+        WHISPER_GGML_TINY_EN,
+        WHISPER_GGML_BASE_EN,
+    )
 }

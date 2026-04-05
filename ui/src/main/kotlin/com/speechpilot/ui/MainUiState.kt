@@ -5,6 +5,7 @@ import com.speechpilot.modelmanager.ModelInstallState
 import com.speechpilot.session.DebugPipelineInfo
 import com.speechpilot.session.SessionMode
 import com.speechpilot.session.TranscriptDebugState
+import com.speechpilot.transcription.WhisperBenchmarkReport
 
 data class MainUiState(
     val statusText: String = "Ready",
@@ -76,4 +77,12 @@ data class MainUiState(
      * silently looking like "transcript pending".
      */
     val whisperNativeLibLoaded: Boolean = false,
+    val whisperBenchmark: WhisperBenchmarkUiState = WhisperBenchmarkUiState(),
+)
+
+data class WhisperBenchmarkUiState(
+    val isRunning: Boolean = false,
+    val sourceLabel: String? = null,
+    val report: WhisperBenchmarkReport? = null,
+    val errorMessage: String? = null,
 )

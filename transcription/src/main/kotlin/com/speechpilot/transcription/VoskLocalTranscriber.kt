@@ -79,6 +79,10 @@ class VoskLocalTranscriber(
         TranscriptionDiagnostics(
             selectedBackend = backend,
             activeBackend = backend,
+            selectedModelId = MODEL_ID,
+            selectedModelDisplayName = MODEL_DISPLAY_NAME,
+            activeModelId = MODEL_ID,
+            activeModelDisplayName = MODEL_DISPLAY_NAME,
             modelPath = modelDirectory.absolutePath,
             modelFilePresent = isModelAvailable(),
         )
@@ -102,6 +106,10 @@ class VoskLocalTranscriber(
         shouldRun = true
         _status.value = TranscriptionEngineStatus.InitializingModel
         _diagnostics.value = _diagnostics.value.copy(
+            selectedModelId = MODEL_ID,
+            selectedModelDisplayName = MODEL_DISPLAY_NAME,
+            activeModelId = MODEL_ID,
+            activeModelDisplayName = MODEL_DISPLAY_NAME,
             selectedBackendStatus = TranscriptionEngineStatus.InitializingModel,
             activeBackendStatus = TranscriptionEngineStatus.InitializingModel,
             modelFilePresent = isModelAvailable(),
@@ -273,6 +281,8 @@ class VoskLocalTranscriber(
     companion object {
         /** Default Vosk model directory name under [Context.getFilesDir]. */
         const val DEFAULT_MODEL_DIR = "vosk-model-small-en-us"
+        const val MODEL_ID = "vosk-model-small-en-us"
+        const val MODEL_DISPLAY_NAME = "Vosk small (en-US)"
 
         /** Expected audio sample rate for the Vosk recognizer. */
         const val SAMPLE_RATE_HZ = 16_000

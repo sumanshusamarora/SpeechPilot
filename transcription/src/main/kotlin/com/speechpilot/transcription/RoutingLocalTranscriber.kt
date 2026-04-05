@@ -55,6 +55,8 @@ class RoutingLocalTranscriber(
         TranscriptionDiagnostics(
             selectedBackend = primaryTranscriber.activeBackend.value,
             activeBackend = TranscriptionBackend.None,
+            selectedModelId = primaryTranscriber.diagnostics.value.selectedModelId,
+            selectedModelDisplayName = primaryTranscriber.diagnostics.value.selectedModelDisplayName,
             selectedBackendStatus = TranscriptionEngineStatus.Disabled,
             activeBackendStatus = TranscriptionEngineStatus.Disabled,
             fallbackBackendStatus = fallbackTranscriber.status.value,
@@ -303,6 +305,18 @@ class RoutingLocalTranscriber(
         _diagnostics.value = TranscriptionDiagnostics(
             selectedBackend = primaryDiagnostics.selectedBackend,
             activeBackend = activeBackendSnapshot,
+            selectedModelId = primaryDiagnostics.selectedModelId,
+            selectedModelDisplayName = primaryDiagnostics.selectedModelDisplayName,
+            activeModelId = when (activeTranscriber) {
+                primaryTranscriber -> primaryDiagnostics.activeModelId
+                fallbackTranscriber -> fallbackDiagnostics.activeModelId
+                else -> null
+            },
+            activeModelDisplayName = when (activeTranscriber) {
+                primaryTranscriber -> primaryDiagnostics.activeModelDisplayName
+                fallbackTranscriber -> fallbackDiagnostics.activeModelDisplayName
+                else -> null
+            },
             selectedBackendStatus = primaryDiagnostics.selectedBackendStatus,
             activeBackendStatus = activeStatusSnapshot,
             fallbackBackendStatus = fallbackDiagnostics.selectedBackendStatus,
@@ -322,12 +336,25 @@ class RoutingLocalTranscriber(
             audioSourceAttached = primaryDiagnostics.audioSourceAttached,
             selectedBackendAudioFramesReceived = primaryDiagnostics.selectedBackendAudioFramesReceived,
             selectedBackendBufferedSamples = primaryDiagnostics.selectedBackendBufferedSamples,
+            chunkDurationMs = primaryDiagnostics.chunkDurationMs,
+            chunkOverlapMs = primaryDiagnostics.chunkOverlapMs,
             chunksProcessed = primaryDiagnostics.chunksProcessed,
             selectedBackendTranscriptUpdatesEmitted = primaryDiagnostics.selectedBackendTranscriptUpdatesEmitted,
             fallbackTranscriptUpdatesEmitted = fallbackDiagnostics.selectedBackendTranscriptUpdatesEmitted,
             totalTranscriptUpdatesEmitted =
                 primaryDiagnostics.selectedBackendTranscriptUpdatesEmitted +
                     fallbackDiagnostics.selectedBackendTranscriptUpdatesEmitted,
+            audioInputSampleRateHz = primaryDiagnostics.audioInputSampleRateHz,
+            audioOutputSampleRateHz = primaryDiagnostics.audioOutputSampleRateHz,
+            audioResampledToTarget = primaryDiagnostics.audioResampledToTarget,
+            audioPeakAbsAmplitude = primaryDiagnostics.audioPeakAbsAmplitude,
+            audioAverageAbsAmplitude = primaryDiagnostics.audioAverageAbsAmplitude,
+            audioClippedSampleCount = primaryDiagnostics.audioClippedSampleCount,
+            audioDurationMs = primaryDiagnostics.audioDurationMs,
+            timeToFirstTranscriptMs = primaryDiagnostics.timeToFirstTranscriptMs,
+            timeToFirstFinalLikeUpdateMs = primaryDiagnostics.timeToFirstFinalLikeUpdateMs,
+            averageChunkInferenceLatencyMs = primaryDiagnostics.averageChunkInferenceLatencyMs,
+            totalProcessingTimeMs = primaryDiagnostics.totalProcessingTimeMs,
             lastTranscriptSource = lastTranscriptSource,
             lastTranscriptError = lastError,
             lastSuccessfulTranscriptAtMs = mergeLatestTimestamp(

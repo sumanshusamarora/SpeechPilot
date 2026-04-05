@@ -152,8 +152,8 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 
 | Class | Role |
 |---|---|
-| `VoskLocalTranscriber` | **Default primary** backend. On-device STT using Vosk. Deterministic, no cloud dependency. Requires Vosk model assets. Reports `DedicatedLocalStt`. |
-| `WhisperCppLocalTranscriber` | **Alternative primary** backend. On-device STT using Whisper.cpp JNI. Better transcript quality for accented English. Chunk-based, Final-only updates. Reports `WhisperCpp`. |
+| `VoskLocalTranscriber` | Dedicated primary backend option. On-device STT using Vosk. Deterministic, no cloud dependency. Requires Vosk model assets. Reports `DedicatedLocalStt`. |
+| `WhisperCppLocalTranscriber` | **Default primary** backend. On-device STT using Whisper.cpp JNI with selectable tiny/base ggml models, shared preprocessing, chunk diagnostics, and Final-only chunked updates. Reports `WhisperCpp`. |
 | `AndroidSpeechRecognizerTranscriber` | **Fallback** backend. Android `SpeechRecognizer` API, offline-preferred best effort. Activated automatically when the primary backend cannot initialize cleanly. |
 | `RoutingLocalTranscriber` | **Router**. Tries the configured primary backend first; if primary initialization fails, it activates `AndroidSpeechRecognizerTranscriber` and preserves the primary failure reason in diagnostics. Exposes both selected/active backend state. |
 | `NoOpLocalTranscriber` | Disabled state (transcription off). |
@@ -166,9 +166,13 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 
 #### Backend selection
 
-**Primary selection** is controlled by `UserPreferences.preferWhisperBackend` (default: `false`):
+**Primary selection** is controlled by `UserPreferences.preferWhisperBackend` (default: `true`):
 - `false` → `VoskLocalTranscriber` is created as the primary backend
 - `true` → `WhisperCppLocalTranscriber` is created as the primary backend
+
+When Whisper is selected, `UserPreferences.whisperModelId` controls which local ggml model is provisioned and activated:
+- `whisper-ggml-tiny-en` (default)
+- `whisper-ggml-base-en`
 
 **Fallback selection** is automatic (performed by `RoutingLocalTranscriber` at session start):
 
@@ -199,6 +203,9 @@ The transcription module uses a **two-tier backend strategy** with a selectable 
 - `WhisperCppLocalTranscriber` also uses the shared audio frame stream. It **buffers PCM frames**
   internally in **2-second chunks** before running inference. It emits **Final-only** updates — there
   are no streaming partial results. This is intentional: Whisper is a chunk-based encoder-decoder.
+- Whisper preprocessing now explicitly normalizes PCM to float and resamples any non-16 kHz input to
+  Whisper's required **16 kHz** rate before inference. This same helper is reused by file benchmarks so
+  file-path evaluation and live-path evaluation exercise the same audio contract.
 - Whisper's native runtime (`libwhisper_jni.so`) is built automatically by CMake `FetchContent` during
   `./gradlew assembleDebug`. whisper.cpp v1.7.2 is fetched from GitHub on first build (requires network);
   subsequent builds use the CMake cache. NDK `26.3.11579264` is pinned. ABIs: `arm64-v8a`, `x86_64`.
@@ -241,10 +248,24 @@ Whisper activation now exposes explicit first-class state rather than silently d
 When the selected backend is Whisper but the native library is not loaded, the UI shows a
 persistent **"Whisper runtime unavailable"** error card (not just a vague "transcript pending"
 state). The debug panel now exposes the selected backend, active backend, backend fallback state/reason,
-model path/presence/readability/size, native load result/error, native init attempt/result,
-primary ready state, audio-source attachment, primary audio-frame count, Whisper buffered samples,
-chunks processed, transcript update counts, last transcript source/error, and last successful
-transcript timestamp.
+selected/active model identity, model path/presence/readability/size, native load result/error,
+native init attempt/result, primary ready state, audio-source attachment, primary audio-frame count,
+Whisper buffered samples, chunks processed, chunk duration/overlap, transcript update counts,
+preprocessing metrics (input/output sample rate, resampling, amplitude, clipping, duration), timing
+metrics (time-to-first-transcript, average chunk latency, total processing time), last transcript
+source/error, and last successful transcript timestamp.
+
+#### Whisper benchmark harness
+
+`WhisperBenchmarkRunner` provides a file-based comparison path for evaluating Whisper quality without
+changing live session behavior.
+
+- Input audio is decoded through `FileAudioCapture`
+- Each run uses a `WhisperBenchmarkConfig` that specifies model identity and chunking strategy
+- The runner produces a `WhisperBenchmarkReport` with per-config transcript, preprocessing, timing,
+  and runtime-error fields
+- `MainViewModel` wires this into the main-screen benchmark card so tiny/base and chunking strategies
+  can be compared from the app UI
 
 #### Other transcript components
 
@@ -272,7 +293,7 @@ network transmission occurs.
 DataStore-backed user preferences. `DataStoreAppSettings` is the concrete implementation of
 `AppSettings`, reading from and writing to `DataStore<Preferences>` under the key
 `user_preferences`. Persists: `targetWpm`, `tolerancePct`, `feedbackCooldownMs`,
-`micSampleRate`, `transcriptionEnabled`, `preferWhisperBackend`. All data is local-only.
+`micSampleRate`, `transcriptionEnabled`, `preferWhisperBackend`, `whisperModelId`. All data is local-only.
 
 `transcriptionEnabled` defaults to `true` — transcription is a first-class feature, on by default.
 `preferWhisperBackend` defaults to `true` — Whisper tiny.en is the default primary STT backend.
@@ -312,6 +333,7 @@ Supports two packaging formats:
 |---|---|---|---|---|---|
 | `vosk-model-small-en-us` | STT | ZIP | Vosk small English model | ~40 MB | Not required |
 | `whisper-ggml-tiny-en` | STT | SINGLE_FILE | Whisper.cpp ggml-tiny.en model | ~75 MB | Not required |
+| `whisper-ggml-base-en` | STT | SINGLE_FILE | Whisper.cpp ggml-base.en model | ~142 MB | Recommended |
 
 #### Storage layout
 
@@ -353,7 +375,7 @@ WorkManager restarts the worker automatically when the app returns and network i
 **Active-backend-only provisioning:**
 `MainViewModel` calls `ensureInstalled()` only for the model required by the currently selected backend:
 - Vosk selected → provision `vosk-model-small-en-us` only
-- Whisper selected → provision `whisper-ggml-tiny-en` only
+- Whisper selected → provision the `whisperModelId` selected in settings (`whisper-ggml-tiny-en` by default)
 - Transcription disabled → no provisioning
 
 The inactive backend's model is never eagerly downloaded. Backend switching triggers a new `ensureInstalled()` call for the newly selected backend's model.

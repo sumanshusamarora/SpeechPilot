@@ -110,8 +110,8 @@ The app uses a **two-tier backend architecture** with selectable primary STT bac
 
 | Backend | Role | Condition |
 |---|---|---|
-| **Vosk** (`VoskLocalTranscriber`) | Primary dedicated STT (default) — deterministic on-device, no cloud | Active when Vosk is selected and model assets are installed |
-| **Whisper.cpp** (`WhisperCppLocalTranscriber`) | Alternative primary STT — better for accented English (e.g. Indian English) | Active when Whisper is selected and model + native library are present |
+| **Vosk** (`VoskLocalTranscriber`) | Dedicated primary STT option — deterministic on-device, no cloud | Active when Vosk is selected and model assets are installed |
+| **Whisper.cpp** (`WhisperCppLocalTranscriber`) | Default primary STT — on-device Whisper with configurable model and chunk diagnostics | Active when Whisper is selected and model + native library are present |
 | **Android SpeechRecognizer** (`AndroidSpeechRecognizerTranscriber`) | **Fallback** — device speech services, offline-preferred | Active when the selected primary backend is unavailable |
 | **No-op** (`NoOpLocalTranscriber`) | Transcription disabled | Settings → Transcription turned off |
 
@@ -119,13 +119,17 @@ The app uses a **two-tier backend architecture** with selectable primary STT bac
 - **Off:** Vosk is the primary backend
 - **On (default):** Whisper.cpp is the primary backend
 
+When Whisper is enabled, **Settings** also exposes the Whisper model choice:
+- **tiny.en (default):** `ggml-tiny.en.bin` (~75 MB)
+- **base.en:** `ggml-base.en.bin` (~142 MB, Wi-Fi recommended)
+
 Selection is performed automatically by `RoutingLocalTranscriber` at session start:
 1. Start the selected primary backend (Vosk or Whisper.cpp)
 2. If the primary fails during initialization (`ModelUnavailable`, `NativeLibraryUnavailable`, `Unavailable`, or init `Error` before `Listening`), stop it and activate the Android SpeechRecognizer fallback
 3. Preserve the selected-backend failure reason in `TranscriptDebugState.diagnostics.fallbackReason`
 4. Expose both the selected backend and the active backend in the transcript diagnostics/debug UI
 
-The debug panel now shows, at minimum, the selected backend, active backend, backend fallback state/reason, model path/presence/readability/size, Whisper native-load result, native-init attempt/result, primary ready state, audio-source attachment, primary audio-frame count, Whisper buffered-sample count, chunks processed, transcript update counts, last transcript source/error, and last successful transcript timestamp. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown with the loader error detail.
+The debug panel now shows, at minimum, the selected backend, active backend, selected/active model identity, backend fallback state/reason, model path/presence/readability/size, Whisper native-load result, native-init attempt/result, primary ready state, audio-source attachment, primary audio-frame count, Whisper buffered-sample count, chunks processed, chunk configuration, transcript update counts, file-audio preprocessing metrics (input/output sample rate, resampling flag, amplitude, clipping, duration), timing metrics (time-to-first-transcript, average chunk latency, total processing time), last transcript source/error, and last successful transcript timestamp. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown with the loader error detail.
 
 #### Vosk backend
 
@@ -135,12 +139,22 @@ The debug panel now shows, at minimum, the selected backend, active backend, bac
 
 #### Whisper.cpp backend (default)
 
-- Model: `ggml-tiny.en.bin` (~75 MB)
-- Default URL: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin`
-- Chunk-based inference: audio is buffered in **2-second windows** before running inference
+- Default model: `ggml-tiny.en.bin` (~75 MB)
+- Optional model: `ggml-base.en.bin` (~142 MB)
+- Chunk-based live inference: audio is buffered in **2-second windows** before running inference
 - **Final-only updates** — no streaming partial results (inherent to Whisper's design)
 - May produce better transcript quality for accented English
+- Shared Whisper preprocessing now resamples any non-16 kHz PCM input to **16 kHz mono float samples** before inference so file benchmarks and live inference use the same input contract
 - Native runtime is compiled automatically by CMake's `FetchContent` on first build — no manual step required
+
+#### Whisper benchmark mode
+
+The main screen now includes a file-based Whisper benchmark launcher for structured comparison work without changing live session behavior.
+
+- Benchmark runs are **offline file comparisons**, separate from microphone sessions
+- The benchmark matrix currently compares **tiny.en** and **base.en** across multiple chunking strategies
+- Results are surfaced as structured per-run cards with model identity, chunk duration, overlap, transcript text, transcript count, preprocessing metrics, timing, and runtime errors
+- The benchmark runner and the live Whisper transcriber share the same chunking and preprocessing helper so chunk-size and sample-rate comparisons are fair
 
 ##### Whisper native runtime (CMake + JNI)
 
@@ -166,7 +180,7 @@ If the native library fails to load at runtime (e.g. unsupported ABI, corrupted 
 **No manual setup is required.** The app automatically downloads the model required by the active STT backend. Downloads are managed by **WorkManager** so they survive app backgrounding.
 
 - **Vosk selected** → provisions Vosk model only (~40 MB, no Wi-Fi required)
-- **Whisper selected** → provisions Whisper model only (~75 MB, no Wi-Fi requirement)
+- **Whisper selected** → provisions the selected Whisper model only (`tiny.en` by default, `base.en` when chosen)
 - **Android SR** or transcription disabled → no model download
 
 A status card on the main screen shows:
@@ -192,6 +206,7 @@ filesDir/
     …
   whisper/                       ← Whisper.cpp model directory (auto-provisioned, ~75 MB)
     ggml-tiny.en.bin             ← ggml model binary (readiness marker)
+    ggml-base.en.bin             ← optional benchmark / higher-quality model
 ```
 
 #### What transcription provides
@@ -206,6 +221,7 @@ filesDir/
 > Transcript text is kept in-memory for the current session and is not stored in session history.
 > Transcript-derived WPM is based on **finalized** recognizer words only. If only partial hypotheses arrive, transcript WPM remains pending by design.
 > Coaching decisions use transcript-derived WPM when transcript readiness is reached. Until then, the app falls back explicitly to heuristic pace.
+> Whisper benchmark runs do not alter the live session chunking strategy; they are separate file-based comparison jobs.
 
 ---
 

@@ -44,7 +44,7 @@ class WhisperCppLocalTranscriberTest {
 
     @Test
     fun `isModelAvailable returns true when model file exists`() {
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(modelFile = modelFile)
 
         assertTrue(transcriber.isModelAvailable())
@@ -103,7 +103,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `start reports ModelUnavailable when native library is not available`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
             runner = FakeWhisperRunner(isAvailable = false),
@@ -121,7 +121,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `start reports NativeLibraryUnavailable when native library is not available`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
             runner = FakeWhisperRunner(isAvailable = false),
@@ -153,7 +153,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `start reports Error when model file is empty`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = tempFolder.newFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
             runner = FakeWhisperRunner(isAvailable = true),
@@ -176,7 +176,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `start reports Error when runner init returns zero context`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
             runner = FakeWhisperRunner(
@@ -207,7 +207,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `start transitions to Listening when model and native library are available`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
             runner = FakeWhisperRunner(isAvailable = true, contextHandle = 42L),
@@ -227,7 +227,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `start accepts signed native pointer handles with high bit set`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val nativePointerBits = -5476377111402469280L // 0xb40000722a45a060 as signed Long
         val transcriber = makeTranscriber(
             modelFile = modelFile,
@@ -251,7 +251,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `stop resets status to Disabled after NativeLibraryUnavailable`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
             runner = FakeWhisperRunner(isAvailable = false),
@@ -286,7 +286,7 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `stop resets status to Disabled while Listening`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
             runner = FakeWhisperRunner(isAvailable = true, contextHandle = 1L),
@@ -329,19 +329,22 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `emits Final TranscriptUpdate when runner returns segments after chunk is full`() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
-        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val modelFile = readableModelFile("ggml-tiny.en.bin")
         val fakeRunner = FakeWhisperRunner(
             isAvailable = true,
             contextHandle = 1L,
             transcriptSegments = listOf("hello world"),
         )
 
-        // Use a small chunk size so the test doesn't need to produce 32k samples.
-        val chunkSize = 4 // 4 samples per chunk for the test
+        val chunkConfig = WhisperChunkingConfig(
+            chunkDurationMs = 1L,
+            overlapDurationMs = 0L,
+        )
+        val chunkSize = chunkConfig.chunkDurationSamples
         val transcriber = WhisperCppLocalTranscriber(
             modelFile = modelFile,
             runner = fakeRunner,
-            chunkDurationSamples = chunkSize,
+            chunkConfig = chunkConfig,
             ioDispatcher = testDispatcher,
         )
 
@@ -357,9 +360,10 @@ class WhisperCppLocalTranscriberTest {
         transcriber.start()
         advanceUntilIdle()
 
-        // Emit two frames of 2 samples each — total = chunkSize, should trigger inference.
-        audioSource.emit(com.speechpilot.audio.AudioFrame(samples = shortArrayOf(100, 200), sampleRate = 16000, capturedAtMs = 0L))
-        audioSource.emit(com.speechpilot.audio.AudioFrame(samples = shortArrayOf(300, 400), sampleRate = 16000, capturedAtMs = 10L))
+        val firstFrameSamples = ShortArray(chunkSize / 2) { 100 }
+        val secondFrameSamples = ShortArray(chunkSize - firstFrameSamples.size) { 200 }
+        audioSource.emit(com.speechpilot.audio.AudioFrame(samples = firstFrameSamples, sampleRate = 16000, capturedAtMs = 0L))
+        audioSource.emit(com.speechpilot.audio.AudioFrame(samples = secondFrameSamples, sampleRate = 16000, capturedAtMs = 10L))
 
         advanceUntilIdle()
         transcriber.stop()
@@ -377,7 +381,7 @@ class WhisperCppLocalTranscriberTest {
     }
 
     // -------------------------------------------------------------------------------------
-    // Descriptor resolution — path matches KnownModels.WHISPER_GGML_SMALL
+    // Descriptor resolution / config propagation
     // -------------------------------------------------------------------------------------
 
     @Test
@@ -392,10 +396,33 @@ class WhisperCppLocalTranscriberTest {
     @Test
     fun `create preserves the provided model path`() {
         val filesDir = tempFolder.newFolder("filesDir")
-        val expectedPath = File(filesDir, "whisper/ggml-small.bin")
+        val expectedPath = File(filesDir, "whisper/ggml-tiny.en.bin")
         val transcriber = WhisperCppLocalTranscriber.create(expectedPath)
 
         assertEquals(expectedPath.absolutePath, transcriber.modelFile.absolutePath)
+    }
+
+    @Test
+    fun `diagnostics expose selected model and chunk settings`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val modelFile = readableModelFile("ggml-base.en.bin")
+        val transcriber = WhisperCppLocalTranscriber(
+            modelFile = modelFile,
+            modelId = "whisper-ggml-base-en",
+            modelDisplayName = "Whisper base.en (ggml)",
+            runner = FakeWhisperRunner(isAvailable = true, contextHandle = 1L),
+            chunkConfig = WhisperChunkingConfig(chunkDurationMs = 4_000L, overlapDurationMs = 1_000L),
+            ioDispatcher = testDispatcher,
+        )
+        transcriber.setAudioSource(emptyFlow())
+
+        transcriber.start()
+        advanceUntilIdle()
+
+        assertEquals("whisper-ggml-base-en", transcriber.diagnostics.value.selectedModelId)
+        assertEquals("Whisper base.en (ggml)", transcriber.diagnostics.value.selectedModelDisplayName)
+        assertEquals(4_000L, transcriber.diagnostics.value.chunkDurationMs)
+        assertEquals(1_000L, transcriber.diagnostics.value.chunkOverlapMs)
     }
 
     // -------------------------------------------------------------------------------------
@@ -411,4 +438,8 @@ class WhisperCppLocalTranscriberTest {
         runner = runner,
         ioDispatcher = ioDispatcher,
     )
+
+    private fun readableModelFile(name: String): File = tempFolder.newFile(name).apply {
+        writeBytes(byteArrayOf(0x57, 0x48, 0x49, 0x53))
+    }
 }
