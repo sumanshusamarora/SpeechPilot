@@ -71,6 +71,11 @@ class WhisperCppLocalTranscriber(
 ) : LocalTranscriber {
 
     private val backend = TranscriptionBackend.WhisperCpp
+    private data class ModelFileSnapshot(
+        val present: Boolean,
+        val readable: Boolean,
+        val sizeBytes: Long?,
+    )
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
@@ -85,17 +90,19 @@ class WhisperCppLocalTranscriber(
     override val status: StateFlow<TranscriptionEngineStatus> = _status.asStateFlow()
 
     private val _diagnostics = MutableStateFlow(
-        TranscriptionDiagnostics(
-            selectedBackend = backend,
-            activeBackend = backend,
-            modelPath = modelFile.absolutePath,
-            modelFilePresent = isModelAvailable(),
-            modelFileReadable = isModelReadable(),
-            modelFileSizeBytes = modelFileSizeBytes(),
-            nativeLibraryName = WhisperNative.LIBRARY_NAME,
-            nativeLibraryLoaded = runner.isAvailable,
-            nativeLibraryLoadError = WhisperNative.loadErrorMessage,
-        )
+        currentModelSnapshot().let { modelSnapshot ->
+            TranscriptionDiagnostics(
+                selectedBackend = backend,
+                activeBackend = backend,
+                modelPath = modelFile.absolutePath,
+                modelFilePresent = modelSnapshot.present,
+                modelFileReadable = modelSnapshot.readable,
+                modelFileSizeBytes = modelSnapshot.sizeBytes,
+                nativeLibraryName = WhisperNative.LIBRARY_NAME,
+                nativeLibraryLoaded = runner.isAvailable,
+                nativeLibraryLoadError = WhisperNative.loadErrorMessage,
+            )
+        }
     )
     override val diagnostics: StateFlow<TranscriptionDiagnostics> = _diagnostics.asStateFlow()
 
@@ -114,6 +121,7 @@ class WhisperCppLocalTranscriber(
     override suspend fun start() {
         if (shouldRun) return
         shouldRun = true
+        val modelSnapshot = currentModelSnapshot()
         _status.value = TranscriptionEngineStatus.InitializingModel
         _diagnostics.value = _diagnostics.value.copy(
             selectedBackendStatus = TranscriptionEngineStatus.InitializingModel,
@@ -121,9 +129,9 @@ class WhisperCppLocalTranscriber(
             fallbackBackendStatus = TranscriptionEngineStatus.Disabled,
             fallbackActive = false,
             fallbackReason = null,
-            modelFilePresent = isModelAvailable(),
-            modelFileReadable = isModelReadable(),
-            modelFileSizeBytes = modelFileSizeBytes(),
+            modelFilePresent = modelSnapshot.present,
+            modelFileReadable = modelSnapshot.readable,
+            modelFileSizeBytes = modelSnapshot.sizeBytes,
             nativeLibraryName = WhisperNative.LIBRARY_NAME,
             nativeLibraryLoaded = runner.isAvailable,
             nativeLibraryLoadError = WhisperNative.loadErrorMessage,
@@ -143,7 +151,7 @@ class WhisperCppLocalTranscriber(
         )
 
         recognitionJob = scope.launch {
-            if (!isModelAvailable()) {
+            if (!modelSnapshot.present) {
                 _status.value = TranscriptionEngineStatus.ModelUnavailable
                 _diagnostics.value = _diagnostics.value.copy(
                     selectedBackendStatus = TranscriptionEngineStatus.ModelUnavailable,
@@ -158,21 +166,21 @@ class WhisperCppLocalTranscriber(
                 )
                 return@launch
             }
-            if (!isModelReadable()) {
+            if (!modelSnapshot.readable) {
                 _status.value = TranscriptionEngineStatus.Error
                 _diagnostics.value = _diagnostics.value.copy(
                     selectedBackendStatus = TranscriptionEngineStatus.Error,
                     activeBackendStatus = TranscriptionEngineStatus.Error,
                     modelFilePresent = true,
                     modelFileReadable = false,
-                    modelFileSizeBytes = modelFileSizeBytes(),
+                    modelFileSizeBytes = modelSnapshot.sizeBytes,
                     lastTranscriptError = TranscriptionFailure(
                         code = "whisper-model-unreadable",
                         message = buildString {
                             append("Whisper model file is not readable at ")
                             append(modelFile.absolutePath)
                             append(" (size=")
-                            append(modelFileSizeBytes() ?: 0L)
+                            append(modelSnapshot.sizeBytes ?: 0L)
                             append(" bytes)")
                         },
                     ),
@@ -228,6 +236,18 @@ class WhisperCppLocalTranscriber(
 
     internal fun modelFileSizeBytes(): Long? = modelFile.takeIf { it.exists() && it.isFile }?.length()
 
+    private fun currentModelSnapshot(): ModelFileSnapshot {
+        val exists = modelFile.exists()
+        val isFile = exists && modelFile.isFile
+        val size = if (isFile) modelFile.length() else null
+        val readable = isFile && modelFile.canRead() && (size ?: 0L) > 0L
+        return ModelFileSnapshot(
+            present = isFile,
+            readable = readable,
+            sizeBytes = size,
+        )
+    }
+
     /**
      * Inference loop. Called only when [isModelAvailable] returns `true` and
      * [WhisperRunner.isAvailable] is `true`.
@@ -260,13 +280,14 @@ class WhisperCppLocalTranscriber(
             var chunksProcessed = 0
 
             try {
+                val modelSnapshot = currentModelSnapshot()
                 ctx = runner.init(modelFile.absolutePath)
                 val nativeInitError = runner.consumeLastError()
                 _diagnostics.value = _diagnostics.value.copy(
                     modelPath = modelFile.absolutePath,
-                    modelFilePresent = isModelAvailable(),
-                    modelFileReadable = isModelReadable(),
-                    modelFileSizeBytes = modelFileSizeBytes(),
+                    modelFilePresent = modelSnapshot.present,
+                    modelFileReadable = modelSnapshot.readable,
+                    modelFileSizeBytes = modelSnapshot.sizeBytes,
                     nativeInitAttempted = true,
                     nativeInitContextPointer = ctx,
                 )
@@ -279,7 +300,8 @@ class WhisperCppLocalTranscriber(
                         lastTranscriptError = TranscriptionFailure(
                             code = "whisper-init-failed",
                             message = nativeInitError
-                                ?: "Whisper native context init failed for ${modelFile.absolutePath}",
+                                ?: "Whisper native context init failed for ${modelFile.absolutePath} " +
+                                    "(size=${modelSnapshot.sizeBytes ?: 0L} bytes)",
                         ),
                     )
                     return@withContext

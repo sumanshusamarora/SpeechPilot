@@ -21,6 +21,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 
@@ -32,15 +33,25 @@
 
 namespace {
 
-thread_local std::string g_last_error;
+std::mutex g_last_error_mutex;
+std::string g_last_error;
 
 void clear_last_error() {
+    std::lock_guard<std::mutex> lock(g_last_error_mutex);
     g_last_error.clear();
 }
 
 void set_last_error(const std::string &message) {
-    g_last_error = message;
+    {
+        std::lock_guard<std::mutex> lock(g_last_error_mutex);
+        g_last_error = message;
+    }
     LOGE("%s", message.c_str());
+}
+
+std::string get_last_error_copy() {
+    std::lock_guard<std::mutex> lock(g_last_error_mutex);
+    return g_last_error;
 }
 
 std::string errno_message(const char *path) {
@@ -130,10 +141,11 @@ Java_com_speechpilot_transcription_WhisperNative_whisperGetLastError(
         JNIEnv  *env,
         jobject /* obj */) {
 
-    if (g_last_error.empty()) {
+    const std::string message = get_last_error_copy();
+    if (message.empty()) {
         return nullptr;
     }
-    return env->NewStringUTF(g_last_error.c_str());
+    return env->NewStringUTF(message.c_str());
 }
 
 JNIEXPORT void JNICALL
