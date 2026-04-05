@@ -125,7 +125,7 @@ Selection is performed automatically by `RoutingLocalTranscriber` at session sta
 3. Preserve the selected-backend failure reason in `TranscriptDebugState.diagnostics.fallbackReason`
 4. Expose both the selected backend and the active backend in the transcript diagnostics/debug UI
 
-The debug panel now shows, at minimum, the selected backend, active backend, backend fallback state/reason, model path/presence, Whisper native-load result, audio-source attachment, primary audio-frame count, Whisper buffered-sample count, chunks processed, transcript update counts, last transcript source/error, and last successful transcript timestamp. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown with the loader error detail.
+The debug panel now shows, at minimum, the selected backend, active backend, backend fallback state/reason, model path/presence/readability/size, Whisper native-load result, native-init attempt/result, primary ready state, audio-source attachment, primary audio-frame count, Whisper buffered-sample count, chunks processed, transcript update counts, last transcript source/error, and last successful transcript timestamp. When Whisper is selected but the native library is not loaded, a persistent **"Whisper runtime unavailable"** error card is shown with the loader error detail.
 
 #### Vosk backend (default)
 
@@ -159,7 +159,7 @@ Validated in the Android build artifact:
 
 On first build, CMake needs network access to clone the whisper.cpp repository (~100 MB). Subsequent builds use the CMake fetch cache and are fully offline. NDK version `26.3.11579264` is pinned for reproducibility.
 
-If the native library fails to load at runtime (e.g. unsupported ABI, corrupted install), `WhisperNative.isAvailable` is `false` and the backend reports `TranscriptionEngineStatus.NativeLibraryUnavailable` → Android SR fallback activates automatically. This failure is **explicitly surfaced** in the UI as a "Whisper runtime unavailable" error card rather than silently appearing as "transcript pending".
+If the native library fails to load at runtime (e.g. unsupported ABI, corrupted install), `WhisperNative.isAvailable` is `false` and the backend reports `TranscriptionEngineStatus.NativeLibraryUnavailable` → Android SR fallback activates automatically. If the model file exists but cannot be opened or native context init returns null, the JNI bridge now preserves that exact failure detail so fallback diagnostics show the real init failure instead of a generic recognizer error. These failures are **explicitly surfaced** in the UI rather than silently appearing as "transcript pending".
 
 #### Automatic model provisioning (WorkManager-backed)
 

@@ -150,6 +150,25 @@ class WhisperCppLocalTranscriberTest {
         assertEquals(TranscriptionEngineStatus.ModelUnavailable, transcriber.status.value)
     }
 
+    @Test
+    fun `start reports Error when model file is empty`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val modelFile = tempFolder.newFile("ggml-small.bin")
+        val transcriber = makeTranscriber(
+            modelFile = modelFile,
+            runner = FakeWhisperRunner(isAvailable = true),
+            ioDispatcher = testDispatcher,
+        )
+
+        transcriber.start()
+        advanceUntilIdle()
+
+        assertEquals(TranscriptionEngineStatus.Error, transcriber.status.value)
+        assertEquals("whisper-model-unreadable", transcriber.diagnostics.value.lastTranscriptError?.code)
+        assertEquals(false, transcriber.diagnostics.value.modelFileReadable)
+        assertEquals(0L, transcriber.diagnostics.value.modelFileSizeBytes)
+    }
+
     // -------------------------------------------------------------------------------------
     // start — Error when init returns invalid context
     // -------------------------------------------------------------------------------------
@@ -160,7 +179,11 @@ class WhisperCppLocalTranscriberTest {
         val modelFile = tempFolder.newFile("ggml-small.bin")
         val transcriber = makeTranscriber(
             modelFile = modelFile,
-            runner = FakeWhisperRunner(isAvailable = true, contextHandle = 0L),
+            runner = FakeWhisperRunner(
+                isAvailable = true,
+                contextHandle = 0L,
+                initErrorMessage = "native init returned null context for readable model"
+            ),
             ioDispatcher = testDispatcher,
         )
         transcriber.setAudioSource(emptyFlow())
@@ -169,6 +192,12 @@ class WhisperCppLocalTranscriberTest {
         advanceUntilIdle()
 
         assertEquals(TranscriptionEngineStatus.Error, transcriber.status.value)
+        assertEquals(true, transcriber.diagnostics.value.nativeInitAttempted)
+        assertEquals(0L, transcriber.diagnostics.value.nativeInitContextPointer)
+        assertEquals(
+            "native init returned null context for readable model",
+            transcriber.diagnostics.value.lastTranscriptError?.message
+        )
     }
 
     // -------------------------------------------------------------------------------------
@@ -190,6 +219,9 @@ class WhisperCppLocalTranscriberTest {
         advanceUntilIdle()
 
         assertEquals(TranscriptionEngineStatus.Listening, transcriber.status.value)
+        assertEquals(true, transcriber.diagnostics.value.nativeInitAttempted)
+        assertEquals(42L, transcriber.diagnostics.value.nativeInitContextPointer)
+        assertEquals(true, transcriber.diagnostics.value.selectedBackendReady)
     }
 
     // -------------------------------------------------------------------------------------
@@ -317,6 +349,8 @@ class WhisperCppLocalTranscriberTest {
             "Expected at least one transcript update but got none",
             collectedUpdates.isNotEmpty()
         )
+        assertEquals(2L, transcriber.diagnostics.value.selectedBackendAudioFramesReceived)
+        assertEquals(1, transcriber.diagnostics.value.chunksProcessed)
         val first = collectedUpdates.first()
         assertEquals("hello world", first.text)
         assertEquals(TranscriptStability.Final, first.stability)

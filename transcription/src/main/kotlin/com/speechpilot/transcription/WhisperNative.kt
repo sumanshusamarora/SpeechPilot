@@ -3,7 +3,7 @@ package com.speechpilot.transcription
 /**
  * JNI bridge for the whisper.cpp native library.
  *
- * Attempts to load `libwhisper.so` at class initialization. If the native library is not bundled
+ * Attempts to load `libwhisper_jni.so` at class initialization. If the native library is not bundled
  * with the APK (e.g. in CI builds or during unit tests), [isAvailable] will be `false` and all
  * [external] methods must not be called.
  *
@@ -64,6 +64,18 @@ object WhisperNative {
      *   The pointer must be freed with [whisperFree] when no longer needed.
      */
     external fun whisperInit(modelPath: String): Long
+
+    /**
+     * Returns the most recent native-side Whisper error, if any.
+     *
+     * This is populated by the JNI bridge for init / inference failures so Kotlin diagnostics can
+     * preserve the exact native failure point instead of collapsing everything into a generic
+     * "init failed" message.
+     */
+    external fun whisperGetLastError(): String?
+
+    /** Clears the cached native-side Whisper error. */
+    external fun whisperClearLastError()
 
     /**
      * Runs full transcription on a block of 16 kHz mono PCM audio samples.

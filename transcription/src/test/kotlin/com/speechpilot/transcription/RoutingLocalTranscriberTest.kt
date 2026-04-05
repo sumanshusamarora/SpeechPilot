@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @ExperimentalCoroutinesApi
@@ -55,6 +56,10 @@ class RoutingLocalTranscriberTest {
                 selectedBackendStatus = TranscriptionEngineStatus.Disabled,
                 activeBackendStatus = TranscriptionEngineStatus.Disabled,
             )
+        }
+
+        fun updateDiagnostics(transform: (TranscriptionDiagnostics) -> TranscriptionDiagnostics) {
+            _diagnostics.value = transform(_diagnostics.value)
         }
     }
 
@@ -164,6 +169,43 @@ class RoutingLocalTranscriberTest {
         assertEquals(true, primary.started)
         assertEquals(true, primary.stopped)
         assertEquals(true, fallback.started)
+    }
+
+    @Test
+    fun `fallback reason preserves exact primary init error detail`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val primary = makePrimary(TranscriptionEngineStatus.Error).apply {
+            updateDiagnostics {
+                it.copy(
+                    lastTranscriptError = TranscriptionFailure(
+                        code = "whisper-init-failed",
+                        message = "whisperInit returned null for '/files/whisper/ggml-small.bin' (488000000 bytes)"
+                    ),
+                    nativeInitAttempted = true,
+                    nativeInitContextPointer = 0L,
+                    modelFileReadable = true,
+                    modelFileSizeBytes = 488_000_000L,
+                )
+            }
+        }
+        val fallback = makeFallback(TranscriptionEngineStatus.Listening)
+
+        val router = RoutingLocalTranscriber(
+            primaryTranscriber = primary,
+            fallbackTranscriber = fallback,
+            fallbackDelayMs = 100,
+            dispatcher = testDispatcher
+        )
+
+        router.start()
+        advanceTimeBy(500)
+
+        assertEquals(TranscriptionBackend.AndroidSpeechRecognizer, router.activeBackend.value)
+        assertEquals("whisper-init-failed", router.diagnostics.value.fallbackReason?.code)
+        assertTrue(
+            router.diagnostics.value.fallbackReason?.message?.contains("whisperInit returned null") == true
+        )
+        assertEquals(0L, router.diagnostics.value.nativeInitContextPointer)
     }
 
     @Test

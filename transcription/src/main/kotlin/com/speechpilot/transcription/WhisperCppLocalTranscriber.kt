@@ -90,6 +90,8 @@ class WhisperCppLocalTranscriber(
             activeBackend = backend,
             modelPath = modelFile.absolutePath,
             modelFilePresent = isModelAvailable(),
+            modelFileReadable = isModelReadable(),
+            modelFileSizeBytes = modelFileSizeBytes(),
             nativeLibraryName = WhisperNative.LIBRARY_NAME,
             nativeLibraryLoaded = runner.isAvailable,
             nativeLibraryLoadError = WhisperNative.loadErrorMessage,
@@ -120,10 +122,15 @@ class WhisperCppLocalTranscriber(
             fallbackActive = false,
             fallbackReason = null,
             modelFilePresent = isModelAvailable(),
+            modelFileReadable = isModelReadable(),
+            modelFileSizeBytes = modelFileSizeBytes(),
             nativeLibraryName = WhisperNative.LIBRARY_NAME,
             nativeLibraryLoaded = runner.isAvailable,
             nativeLibraryLoadError = WhisperNative.loadErrorMessage,
+            nativeInitAttempted = false,
+            nativeInitContextPointer = null,
             selectedBackendInitSucceeded = false,
+            selectedBackendReady = false,
             selectedBackendAudioFramesReceived = 0,
             selectedBackendBufferedSamples = 0,
             chunksProcessed = 0,
@@ -142,9 +149,32 @@ class WhisperCppLocalTranscriber(
                     selectedBackendStatus = TranscriptionEngineStatus.ModelUnavailable,
                     activeBackendStatus = TranscriptionEngineStatus.ModelUnavailable,
                     modelFilePresent = false,
+                    modelFileReadable = false,
+                    modelFileSizeBytes = null,
                     lastTranscriptError = TranscriptionFailure(
                         code = "whisper-model-missing",
                         message = "Whisper model file missing at ${modelFile.absolutePath}",
+                    ),
+                )
+                return@launch
+            }
+            if (!isModelReadable()) {
+                _status.value = TranscriptionEngineStatus.Error
+                _diagnostics.value = _diagnostics.value.copy(
+                    selectedBackendStatus = TranscriptionEngineStatus.Error,
+                    activeBackendStatus = TranscriptionEngineStatus.Error,
+                    modelFilePresent = true,
+                    modelFileReadable = false,
+                    modelFileSizeBytes = modelFileSizeBytes(),
+                    lastTranscriptError = TranscriptionFailure(
+                        code = "whisper-model-unreadable",
+                        message = buildString {
+                            append("Whisper model file is not readable at ")
+                            append(modelFile.absolutePath)
+                            append(" (size=")
+                            append(modelFileSizeBytes() ?: 0L)
+                            append(" bytes)")
+                        },
                     ),
                 )
                 return@launch
@@ -179,6 +209,8 @@ class WhisperCppLocalTranscriber(
         _diagnostics.value = _diagnostics.value.copy(
             selectedBackendStatus = TranscriptionEngineStatus.Disabled,
             activeBackendStatus = TranscriptionEngineStatus.Disabled,
+            nativeInitContextPointer = null,
+            selectedBackendReady = false,
             selectedBackendBufferedSamples = 0,
         )
     }
@@ -190,6 +222,11 @@ class WhisperCppLocalTranscriber(
      * the full session lifecycle.
      */
     internal fun isModelAvailable(): Boolean = modelFile.exists() && modelFile.isFile
+
+    internal fun isModelReadable(): Boolean =
+        isModelAvailable() && modelFile.canRead() && modelFile.length() > 0L
+
+    internal fun modelFileSizeBytes(): Long? = modelFile.takeIf { it.exists() && it.isFile }?.length()
 
     /**
      * Inference loop. Called only when [isModelAvailable] returns `true` and
@@ -207,6 +244,7 @@ class WhisperCppLocalTranscriber(
                 _diagnostics.value = _diagnostics.value.copy(
                     selectedBackendStatus = TranscriptionEngineStatus.Error,
                     activeBackendStatus = TranscriptionEngineStatus.Error,
+                    selectedBackendReady = false,
                     lastTranscriptError = TranscriptionFailure(
                         code = "whisper-audio-source-missing",
                         message = "Whisper audio source was not attached before start()",
@@ -223,14 +261,25 @@ class WhisperCppLocalTranscriber(
 
             try {
                 ctx = runner.init(modelFile.absolutePath)
+                val nativeInitError = runner.consumeLastError()
+                _diagnostics.value = _diagnostics.value.copy(
+                    modelPath = modelFile.absolutePath,
+                    modelFilePresent = isModelAvailable(),
+                    modelFileReadable = isModelReadable(),
+                    modelFileSizeBytes = modelFileSizeBytes(),
+                    nativeInitAttempted = true,
+                    nativeInitContextPointer = ctx,
+                )
                 if (ctx <= 0L) {
                     _status.value = TranscriptionEngineStatus.Error
                     _diagnostics.value = _diagnostics.value.copy(
                         selectedBackendStatus = TranscriptionEngineStatus.Error,
                         activeBackendStatus = TranscriptionEngineStatus.Error,
+                        selectedBackendReady = false,
                         lastTranscriptError = TranscriptionFailure(
                             code = "whisper-init-failed",
-                            message = "Whisper model initialization failed for ${modelFile.absolutePath}",
+                            message = nativeInitError
+                                ?: "Whisper native context init failed for ${modelFile.absolutePath}",
                         ),
                     )
                     return@withContext
@@ -241,6 +290,7 @@ class WhisperCppLocalTranscriber(
                     selectedBackendStatus = TranscriptionEngineStatus.Listening,
                     activeBackendStatus = TranscriptionEngineStatus.Listening,
                     selectedBackendInitSucceeded = true,
+                    selectedBackendReady = true,
                     lastTranscriptError = null,
                 )
 
@@ -275,15 +325,18 @@ class WhisperCppLocalTranscriber(
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 if (shouldRun) {
                     _status.value = TranscriptionEngineStatus.Error
                     _diagnostics.value = _diagnostics.value.copy(
                         selectedBackendStatus = TranscriptionEngineStatus.Error,
                         activeBackendStatus = TranscriptionEngineStatus.Error,
+                        selectedBackendReady = false,
                         lastTranscriptError = TranscriptionFailure(
                             code = "whisper-runtime-error",
-                            message = e.message ?: "Whisper transcription failed during runtime",
+                            message = runner.consumeLastError()
+                                ?: e.message
+                                ?: "Whisper transcription failed during runtime",
                         ),
                     )
                 }
@@ -374,6 +427,9 @@ interface WhisperRunner {
 
     /** Releases the Whisper context. Must be called when done with [ctx]. */
     fun free(ctx: Long)
+
+    /** Returns and clears the most recent native error surfaced by the backend, if any. */
+    fun consumeLastError(): String?
 }
 
 /**
@@ -402,6 +458,13 @@ class WhisperNativeRunner : WhisperRunner {
     override fun free(ctx: Long) {
         if (isAvailable) WhisperNative.whisperFree(ctx)
     }
+
+    override fun consumeLastError(): String? {
+        if (!isAvailable) return WhisperNative.loadErrorMessage
+        return WhisperNative.whisperGetLastError()?.also {
+            WhisperNative.whisperClearLastError()
+        }
+    }
 }
 
 /**
@@ -414,6 +477,8 @@ class FakeWhisperRunner(
     override val isAvailable: Boolean = false,
     private val contextHandle: Long = 1L,
     private val transcriptSegments: List<String> = emptyList(),
+    private val initErrorMessage: String? = null,
+    private val transcribeErrorMessage: String? = null,
 ) : WhisperRunner {
 
     var initCallCount = 0
@@ -422,18 +487,27 @@ class FakeWhisperRunner(
         private set
     var freeCallCount = 0
         private set
+    private var pendingError: String? = null
 
     override fun init(modelPath: String): Long {
         initCallCount++
+        pendingError = when {
+            !isAvailable -> "Whisper native library unavailable"
+            contextHandle <= 0L -> initErrorMessage ?: "Whisper native init returned null context"
+            else -> null
+        }
         return if (isAvailable) contextHandle else 0L
     }
 
     override fun transcribe(ctx: Long, samples: FloatArray): List<String> {
         transcribeCallCount++
+        pendingError = transcribeErrorMessage
         return transcriptSegments
     }
 
     override fun free(ctx: Long) {
         freeCallCount++
     }
+
+    override fun consumeLastError(): String? = pendingError.also { pendingError = null }
 }
