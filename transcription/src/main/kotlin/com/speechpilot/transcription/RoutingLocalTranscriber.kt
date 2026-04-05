@@ -144,7 +144,15 @@ class RoutingLocalTranscriber(
                 primaryTranscriber.start()
             } catch (error: CancellationException) {
                 throw error
-            } catch (error: Throwable) {
+            } catch (error: UnsatisfiedLinkError) {
+                activateFallback(
+                    TranscriptionFailure(
+                        code = "primary-start-failed",
+                        message = error.message ?: "Selected transcription backend failed to start",
+                    )
+                )
+                return@launch
+            } catch (error: Exception) {
                 activateFallback(
                     TranscriptionFailure(
                         code = "primary-start-failed",

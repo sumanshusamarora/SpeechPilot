@@ -325,7 +325,22 @@ class WhisperCppLocalTranscriber(
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Throwable) {
+            } catch (e: UnsatisfiedLinkError) {
+                if (shouldRun) {
+                    _status.value = TranscriptionEngineStatus.Error
+                    _diagnostics.value = _diagnostics.value.copy(
+                        selectedBackendStatus = TranscriptionEngineStatus.Error,
+                        activeBackendStatus = TranscriptionEngineStatus.Error,
+                        selectedBackendReady = false,
+                        lastTranscriptError = TranscriptionFailure(
+                            code = "whisper-runtime-error",
+                            message = runner.consumeLastError()
+                                ?: e.message
+                                ?: "Whisper transcription failed during runtime",
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
                 if (shouldRun) {
                     _status.value = TranscriptionEngineStatus.Error
                     _diagnostics.value = _diagnostics.value.copy(
