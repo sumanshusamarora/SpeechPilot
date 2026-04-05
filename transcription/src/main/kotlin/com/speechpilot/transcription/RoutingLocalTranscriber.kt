@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
@@ -141,6 +142,16 @@ class RoutingLocalTranscriber(
 
             try {
                 primaryTranscriber.start()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: UnsatisfiedLinkError) {
+                activateFallback(
+                    TranscriptionFailure(
+                        code = "primary-start-failed",
+                        message = error.message ?: "Selected transcription backend failed to start",
+                    )
+                )
+                return@launch
             } catch (error: Exception) {
                 activateFallback(
                     TranscriptionFailure(
@@ -301,10 +312,15 @@ class RoutingLocalTranscriber(
             fallbackReason = fallbackReason,
             modelPath = primaryDiagnostics.modelPath,
             modelFilePresent = primaryDiagnostics.modelFilePresent,
+            modelFileReadable = primaryDiagnostics.modelFileReadable,
+            modelFileSizeBytes = primaryDiagnostics.modelFileSizeBytes,
             nativeLibraryName = primaryDiagnostics.nativeLibraryName,
             nativeLibraryLoaded = primaryDiagnostics.nativeLibraryLoaded,
             nativeLibraryLoadError = primaryDiagnostics.nativeLibraryLoadError,
+            nativeInitAttempted = primaryDiagnostics.nativeInitAttempted,
+            nativeInitContextPointer = primaryDiagnostics.nativeInitContextPointer,
             selectedBackendInitSucceeded = primaryDiagnostics.selectedBackendInitSucceeded,
+            selectedBackendReady = primaryDiagnostics.selectedBackendReady,
             audioSourceAttached = primaryDiagnostics.audioSourceAttached,
             selectedBackendAudioFramesReceived = primaryDiagnostics.selectedBackendAudioFramesReceived,
             selectedBackendBufferedSamples = primaryDiagnostics.selectedBackendBufferedSamples,

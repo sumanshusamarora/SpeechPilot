@@ -241,9 +241,10 @@ Whisper activation now exposes explicit first-class state rather than silently d
 When the selected backend is Whisper but the native library is not loaded, the UI shows a
 persistent **"Whisper runtime unavailable"** error card (not just a vague "transcript pending"
 state). The debug panel now exposes the selected backend, active backend, backend fallback state/reason,
-model path/presence, native load result/error, audio-source attachment, primary audio-frame count,
-Whisper buffered samples, chunks processed, transcript update counts, last transcript source/error,
-and last successful transcript timestamp.
+model path/presence/readability/size, native load result/error, native init attempt/result,
+primary ready state, audio-source attachment, primary audio-frame count, Whisper buffered samples,
+chunks processed, transcript update counts, last transcript source/error, and last successful
+transcript timestamp.
 
 #### Other transcript components
 

@@ -17,14 +17,48 @@
  */
 
 #include <jni.h>
-#include <string>
 #include <android/log.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <sys/stat.h>
 
 #include "whisper.h"
 
 #define LOG_TAG "WhisperJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+namespace {
+
+std::mutex g_last_error_mutex;
+std::string g_last_error;
+
+void clear_last_error() {
+    std::lock_guard<std::mutex> lock(g_last_error_mutex);
+    g_last_error.clear();
+}
+
+void set_last_error(const std::string &message) {
+    {
+        std::lock_guard<std::mutex> lock(g_last_error_mutex);
+        g_last_error = message;
+    }
+    LOGE("%s", message.c_str());
+}
+
+std::string get_last_error_copy() {
+    std::lock_guard<std::mutex> lock(g_last_error_mutex);
+    return g_last_error;
+}
+
+std::string errno_message(const char *path) {
+    return std::string(path) + ": " + std::strerror(errno);
+}
+
+} // namespace
 
 extern "C" {
 
@@ -37,26 +71,89 @@ Java_com_speechpilot_transcription_WhisperNative_whisperInit(
         jobject /* obj */,
         jstring  modelPath) {
 
-    const char *path = env->GetStringUTFChars(modelPath, nullptr);
-    if (path == nullptr) {
-        LOGE("whisperInit: GetStringUTFChars returned null");
+    clear_last_error();
+
+    if (modelPath == nullptr) {
+        set_last_error("whisperInit: model path was null");
         return 0L;
     }
+
+    const char *path_chars = env->GetStringUTFChars(modelPath, nullptr);
+    if (path_chars == nullptr) {
+        set_last_error("whisperInit: GetStringUTFChars returned null");
+        return 0L;
+    }
+
+    const std::string path(path_chars);
+    env->ReleaseStringUTFChars(modelPath, path_chars);
+
+    if (path.empty()) {
+        set_last_error("whisperInit: model path was empty");
+        return 0L;
+    }
+
+    struct stat model_stat {};
+    if (stat(path.c_str(), &model_stat) != 0) {
+        set_last_error("whisperInit: unable to stat model file " + errno_message(path.c_str()));
+        return 0L;
+    }
+
+    if (!S_ISREG(model_stat.st_mode)) {
+        set_last_error("whisperInit: model path is not a regular file: " + path);
+        return 0L;
+    }
+
+    if (model_stat.st_size <= 0) {
+        set_last_error("whisperInit: model file is empty: " + path);
+        return 0L;
+    }
+
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    if (file == nullptr) {
+        set_last_error("whisperInit: unable to open model file " + errno_message(path.c_str()));
+        return 0L;
+    }
+    std::fclose(file);
 
     whisper_context_params params = whisper_context_default_params();
     // GPU acceleration is not requested here; ggml will use CPU NEON on arm64.
     params.use_gpu = false;
 
-    whisper_context *ctx = whisper_init_from_file_with_params(path, params);
-    env->ReleaseStringUTFChars(modelPath, path);
+    LOGI("whisperInit: attempting init from '%s' (%lld bytes)",
+         path.c_str(),
+         static_cast<long long>(model_stat.st_size));
+    whisper_context *ctx = whisper_init_from_file_with_params(path.c_str(), params);
 
     if (ctx == nullptr) {
-        LOGE("whisperInit: failed to load model from '%s'", path);
+        set_last_error(
+                "whisperInit: whisper_init_from_file_with_params returned null for '" + path +
+                "' (" + std::to_string(static_cast<long long>(model_stat.st_size)) + " bytes)");
         return 0L;
     }
 
+    clear_last_error();
     LOGI("whisperInit: context initialised %p", static_cast<void *>(ctx));
     return reinterpret_cast<jlong>(ctx);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_speechpilot_transcription_WhisperNative_whisperGetLastError(
+        JNIEnv  *env,
+        jobject /* obj */) {
+
+    const std::string message = get_last_error_copy();
+    if (message.empty()) {
+        return nullptr;
+    }
+    return env->NewStringUTF(message.c_str());
+}
+
+JNIEXPORT void JNICALL
+Java_com_speechpilot_transcription_WhisperNative_whisperClearLastError(
+        JNIEnv  * /* env */,
+        jobject   /* obj */) {
+
+    clear_last_error();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,9 +167,11 @@ Java_com_speechpilot_transcription_WhisperNative_whisperFull(
         jfloatArray samples,
         jint      nSamples) {
 
+    clear_last_error();
+
     auto *ctx = reinterpret_cast<whisper_context *>(ctxHandle);
     if (ctx == nullptr) {
-        LOGE("whisperFull: null context");
+        set_last_error("whisperFull: null context");
         return -1;
     }
 
@@ -90,7 +189,7 @@ Java_com_speechpilot_transcription_WhisperNative_whisperFull(
 
     jfloat *raw = env->GetFloatArrayElements(samples, nullptr);
     if (raw == nullptr) {
-        LOGE("whisperFull: GetFloatArrayElements returned null");
+        set_last_error("whisperFull: GetFloatArrayElements returned null");
         return -1;
     }
 
@@ -98,7 +197,9 @@ Java_com_speechpilot_transcription_WhisperNative_whisperFull(
     env->ReleaseFloatArrayElements(samples, raw, JNI_ABORT);
 
     if (result != 0) {
-        LOGE("whisperFull: inference returned error %d", result);
+        set_last_error("whisperFull: inference returned error " + std::to_string(result));
+    } else {
+        clear_last_error();
     }
     return result;
 }
