@@ -11,4 +11,4 @@ from app.persistence.realtime_store.redis_store import RedisRealtimeStore
 def build_realtime_store(settings: Settings, logger: logging.Logger) -> RealtimeStore:
     if settings.realtime_store_backend == RealtimeStoreBackend.MANAGED:
         return ManagedRealtimeStorePlaceholder(logger=logger)
-    return RedisRealtimeStore(redis_url=settings.redis_url, logger=logger)
+    return RedisRealtimeStore(redis_url=settings.realtime_store_url(), logger=logger)

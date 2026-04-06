@@ -12,7 +12,7 @@ Current scope:
 - replay upload flow that drives the same chunk pipeline as live audio
 - structured `debug.state` snapshots for lifecycle and runtime counters
 - REST history endpoints for session list/detail/delete
-- environment-based configuration and Redis-backed ephemeral realtime state
+- environment-based configuration and Redis or ElastiCache-backed ephemeral realtime state
 
 ## Layout
 
@@ -133,5 +133,7 @@ Replay and debugging:
 ## Realtime store direction
 
 - local development uses Redis via `RedisRealtimeStore`
-- production can switch to another managed implementation behind the same `RealtimeStore` interface
+- deployed environments can use Redis-compatible Amazon ElastiCache by setting `SPEECHPILOT_REALTIME_STORE_BACKEND=elasticache`
+- `SPEECHPILOT_ELASTICACHE_URL` is preferred for managed cache endpoints; if omitted the backend falls back to `SPEECHPILOT_REDIS_URL`
+- tests can continue using the in-memory placeholder via `SPEECHPILOT_REALTIME_STORE_BACKEND=managed`
 - business-facing services consume the abstraction, not Redis directly

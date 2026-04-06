@@ -16,6 +16,7 @@ class Environment(StrEnum):
 
 class RealtimeStoreBackend(StrEnum):
     REDIS = "redis"
+    ELASTICACHE = "elasticache"
     MANAGED = "managed"
 
 
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     protocol_version: str = "1.0"
     postgres_url: str = "postgresql://speechpilot:speechpilot@postgres:5432/speechpilot"
     redis_url: str = "redis://redis:6379/0"
+    elasticache_url: str | None = None
     realtime_store_backend: RealtimeStoreBackend = RealtimeStoreBackend.REDIS
     replay_enabled: bool = True
     stt_provider_name: str = "faster_whisper"
@@ -55,6 +57,11 @@ class Settings(BaseSettings):
     coaching_cooldown_ms: int = 12000
     coaching_min_words_for_feedback: int = 8
     debug_snapshot_chunk_interval: int = 10
+
+    def realtime_store_url(self) -> str:
+        if self.realtime_store_backend == RealtimeStoreBackend.ELASTICACHE:
+            return self.elasticache_url or self.redis_url
+        return self.redis_url
 
 
 

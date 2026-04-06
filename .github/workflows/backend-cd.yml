@@ -1,0 +1,280 @@
+name: Backend CD
+
+on:
+  push:
+    branches: ["main"]
+    tags:
+      - "staging-*"
+      - "production-*"
+  workflow_dispatch:
+    inputs:
+      deploy_env:
+        description: "Target deployment environment"
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - development
+          - staging
+          - production
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      deploy_env: ${{ steps.env.outputs.deploy_env }}
+      github_environment: ${{ steps.env.outputs.github_environment }}
+      image_tag: ${{ steps.env.outputs.image_tag }}
+      short_sha: ${{ steps.env.outputs.short_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve environment
+        id: env
+        shell: bash
+        env:
+          DEPLOY_ENV_OVERRIDE: ${{ github.event.inputs.deploy_env }}
+        run: |
+          set -euo pipefail
+          bash scripts/resolve-deploy-env.sh "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: resolve
+    if: needs.resolve.outputs.environment != 'none'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.github_environment }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-2' }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+      ECR_PUSH_ROLE_ARN: ${{ vars.ECR_PUSH_ROLE_ARN }}
+      CLUSTER_DEPLOY_ROLE_ARN: ${{ vars.CLUSTER_DEPLOY_ROLE_ARN || vars.CLUSTER_ACCESS_ROLE_ARN }}
+      DEPLOY_ENV: ${{ needs.resolve.outputs.deploy_env }}
+      IMAGE_TAG: ${{ needs.resolve.outputs.short_sha }}
+      ENV_TAG: ${{ needs.resolve.outputs.deploy_env }}
+      BASE_IMAGE_TAG: ${{ needs.resolve.outputs.short_sha }}
+      PROMOTE_IMAGE: ${{ startsWith(github.ref, 'refs/tags/') }}
+      K8S_NAMESPACE: ${{ format('speechpilot-{0}', needs.resolve.outputs.deploy_env) }}
+      REALTIME_STORE_BACKEND: ${{ vars.SPEECHPILOT_REALTIME_STORE_BACKEND || 'elasticache' }}
+      REALTIME_STORE_URL: ${{ secrets.SPEECHPILOT_ELASTICACHE_URL || vars.SPEECHPILOT_ELASTICACHE_URL || secrets.SPEECHPILOT_REDIS_URL || vars.SPEECHPILOT_REDIS_URL || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || vars.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ECR_REPOSITORY}" ]; then
+            echo "Missing ECR_REPOSITORY (GitHub Actions Variable)." >&2
+            exit 1
+          fi
+          if [ -z "${ECR_PUSH_ROLE_ARN}" ]; then
+            echo "Missing ECR_PUSH_ROLE_ARN (GitHub Actions Variable)." >&2
+            exit 1
+          fi
+          if [ -z "${CLUSTER_DEPLOY_ROLE_ARN}" ]; then
+            echo "Missing CLUSTER_DEPLOY_ROLE_ARN or CLUSTER_ACCESS_ROLE_ARN (GitHub Actions Variable)." >&2
+            exit 1
+          fi
+          if [ -z "${EKS_CLUSTER_NAME}" ]; then
+            echo "Missing EKS_CLUSTER_NAME (GitHub Actions Variable)." >&2
+            exit 1
+          fi
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "Missing DATABASE_URL (GitHub Actions Secret or Variable)." >&2
+            exit 1
+          fi
+          if [ -z "${REALTIME_STORE_URL}" ]; then
+            echo "Missing SPEECHPILOT_ELASTICACHE_URL or SPEECHPILOT_REDIS_URL (GitHub Actions Secret or Variable)." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (ECR push)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ECR_PUSH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: speechpilot-backend-cd-ecr
+          audience: sts.amazonaws.com
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        if: env.PROMOTE_IMAGE != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REPOSITORY }}:${{ env.ENV_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Promote image tag in ECR
+        if: env.PROMOTE_IMAGE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository_name="${ECR_REPOSITORY##*/}"
+          echo "Promoting ${ECR_REPOSITORY}:${BASE_IMAGE_TAG} (adding ${ECR_REPOSITORY}:${ENV_TAG} tag)"
+          manifest=$(aws ecr batch-get-image \
+            --repository-name "${repository_name}" \
+            --image-ids imageTag="${BASE_IMAGE_TAG}" \
+            --query 'images[0].imageManifest' \
+            --output text)
+          if [ -z "${manifest}" ] || [ "${manifest}" = "None" ]; then
+            echo "Missing source image tag ${BASE_IMAGE_TAG} in ${repository_name}." >&2
+            exit 1
+          fi
+
+          put_image_error_file=$(mktemp)
+          if aws ecr put-image \
+            --repository-name "${repository_name}" \
+            --image-tag "${ENV_TAG}" \
+            --image-manifest "${manifest}" \
+            2>"${put_image_error_file}"; then
+            echo "Promotion tag ${ENV_TAG} updated successfully."
+          elif grep -q "ImageAlreadyExistsException" "${put_image_error_file}"; then
+            echo "Image tag ${ENV_TAG} already points at this digest. Continuing without changes."
+          else
+            cat "${put_image_error_file}" >&2
+            exit 1
+          fi
+          rm -f "${put_image_error_file}"
+
+      - name: Configure AWS credentials (cluster deploy)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CLUSTER_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: speechpilot-backend-cd-cluster
+          audience: sts.amazonaws.com
+
+      - name: Update kubeconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig \
+            --name "${EKS_CLUSTER_NAME}" \
+            --region "${AWS_REGION}"
+
+      - name: Ensure namespace exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl apply -f "k8s/overlays/${DEPLOY_ENV}/namespace.yaml"
+
+      - name: Create Kubernetes config map
+        shell: bash
+        env:
+          SPEECHPILOT_LOG_LEVEL: ${{ vars.SPEECHPILOT_LOG_LEVEL || 'INFO' }}
+          SPEECHPILOT_REPLAY_ENABLED: ${{ vars.SPEECHPILOT_REPLAY_ENABLED || 'true' }}
+          SPEECHPILOT_STT_MODEL_SIZE: ${{ vars.SPEECHPILOT_STT_MODEL_SIZE || 'small.en' }}
+          SPEECHPILOT_STT_LANGUAGE: ${{ vars.SPEECHPILOT_STT_LANGUAGE || 'en' }}
+          SPEECHPILOT_STT_DEVICE: ${{ vars.SPEECHPILOT_STT_DEVICE || 'cpu' }}
+          SPEECHPILOT_STT_COMPUTE_TYPE: ${{ vars.SPEECHPILOT_STT_COMPUTE_TYPE || 'int8' }}
+        run: |
+          set -euo pipefail
+          kubectl create configmap speechpilot-backend-config \
+            --from-literal=SPEECHPILOT_ENVIRONMENT="${DEPLOY_ENV}" \
+            --from-literal=SPEECHPILOT_LOG_LEVEL="${SPEECHPILOT_LOG_LEVEL}" \
+            --from-literal=SPEECHPILOT_REALTIME_STORE_BACKEND="${REALTIME_STORE_BACKEND}" \
+            --from-literal=SPEECHPILOT_REPLAY_ENABLED="${SPEECHPILOT_REPLAY_ENABLED}" \
+            --from-literal=SPEECHPILOT_STT_MODEL_SIZE="${SPEECHPILOT_STT_MODEL_SIZE}" \
+            --from-literal=SPEECHPILOT_STT_LANGUAGE="${SPEECHPILOT_STT_LANGUAGE}" \
+            --from-literal=SPEECHPILOT_STT_DEVICE="${SPEECHPILOT_STT_DEVICE}" \
+            --from-literal=SPEECHPILOT_STT_COMPUTE_TYPE="${SPEECHPILOT_STT_COMPUTE_TYPE}" \
+            --namespace="${K8S_NAMESPACE}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create Kubernetes secrets
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || vars.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          kubectl create secret generic speechpilot-backend-secrets \
+            --from-literal=SPEECHPILOT_POSTGRES_URL="${DATABASE_URL}" \
+            --from-literal=SPEECHPILOT_REDIS_URL="${REALTIME_STORE_URL}" \
+            --from-literal=SPEECHPILOT_ELASTICACHE_URL="${REALTIME_STORE_URL}" \
+            --namespace="${K8S_NAMESPACE}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Kubernetes manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl apply -k "k8s/overlays/${DEPLOY_ENV}"
+
+      - name: Run database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl delete job speechpilot-backend-migrate \
+            --namespace="${K8S_NAMESPACE}" \
+            --ignore-not-found
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: speechpilot-backend-migrate
+            namespace: ${K8S_NAMESPACE}
+          spec:
+            backoffLimit: 3
+            ttlSecondsAfterFinished: 600
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: speechpilot-backend
+                  app.kubernetes.io/component: migrate
+              spec:
+                restartPolicy: Never
+                serviceAccountName: speechpilot-backend
+                containers:
+                  - name: migrate
+                    image: ${ECR_REPOSITORY}:${IMAGE_TAG}
+                    imagePullPolicy: Always
+                    command:
+                      - alembic
+                      - upgrade
+                      - head
+                    envFrom:
+                      - configMapRef:
+                          name: speechpilot-backend-config
+                      - secretRef:
+                          name: speechpilot-backend-secrets
+          EOF
+
+          kubectl wait \
+            --for=condition=complete \
+            job/speechpilot-backend-migrate \
+            --namespace="${K8S_NAMESPACE}" \
+            --timeout=5m
+
+      - name: Roll out API deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl set image deployment/speechpilot-backend-api \
+            speechpilot-backend-api="${ECR_REPOSITORY}:${IMAGE_TAG}" \
+            -n "${K8S_NAMESPACE}"
+          kubectl rollout status deployment/speechpilot-backend-api -n "${K8S_NAMESPACE}" --timeout=5m
