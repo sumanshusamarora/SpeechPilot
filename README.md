@@ -4,6 +4,22 @@ A native Android application that provides real-time speech pace feedback to hel
 
 All core coaching pipeline processing runs locally on-device. No backend, cloud, or external services are required for pace estimation/feedback.
 
+## Transition Status
+
+This repository now contains two tracks:
+
+- `v1` at the repository root: the existing Android-first application and supporting modules
+- `v2` under `src/`: the new backend-first scaffold for realtime websocket work
+
+Current v2 scaffold locations:
+
+- `src/backend` — FastAPI backend scaffold
+- `src/web` — Next.js debug shell
+- `src/contracts` — shared realtime contracts
+- `infra/docker` — local docker-compose stack
+
+The root Android application remains the current product implementation. New v2 work should be added under `src/`. See `src/ARCHITECTURE.md` for the transition design and target structure.
+
 ---
 
 ## Project Status

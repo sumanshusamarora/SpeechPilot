@@ -1,0 +1,69 @@
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: src/backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      SPEECHPILOT_ENVIRONMENT: ${SPEECHPILOT_ENVIRONMENT:-local}
+      SPEECHPILOT_POSTGRES_URL: ${SPEECHPILOT_POSTGRES_URL:-postgresql://speechpilot:speechpilot@postgres:5432/speechpilot}
+      SPEECHPILOT_REDIS_URL: ${SPEECHPILOT_REDIS_URL:-redis://redis:6379/0}
+      SPEECHPILOT_REALTIME_STORE_BACKEND: ${SPEECHPILOT_REALTIME_STORE_BACKEND:-redis}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../src/backend:/workspace/src/backend
+      - ../../src/contracts/python:/workspace/src/contracts/python
+
+  web:
+    build:
+      context: ../..
+      dockerfile: src/web/Dockerfile
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_BACKEND_HTTP_URL: ${NEXT_PUBLIC_BACKEND_HTTP_URL:-http://localhost:8000}
+      NEXT_PUBLIC_BACKEND_WS_URL: ${NEXT_PUBLIC_BACKEND_WS_URL:-ws://localhost:8000/ws}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../src/web:/workspace/src/web
+      - ../../src/contracts/typescript:/workspace/src/contracts/typescript
+      - web_node_modules:/workspace/src/web/node_modules
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-speechpilot}
+      POSTGRES_USER: ${POSTGRES_USER:-speechpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-speechpilot}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  web_node_modules:

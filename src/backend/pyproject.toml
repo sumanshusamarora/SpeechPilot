@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "speechpilot-backend"
+version = "0.1.0"
+description = "SpeechPilot v2 FastAPI backend scaffold."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "pydantic-settings>=2.6,<3",
+  "redis>=5,<6",
+  "uvicorn[standard]>=0.32,<1"
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8,<9"
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "../contracts/python"]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speechpilot.dev/contracts/realtime-events.v1.schema.json",
+  "title": "SpeechPilot Realtime Events v1",
+  "description": "Canonical websocket envelope for SpeechPilot v2 realtime sessions.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SessionStartEvent"
+    },
+    {
+      "$ref": "#/$defs/AudioChunkEvent"
+    },
+    {
+      "$ref": "#/$defs/SessionStopEvent"
+    },
+    {
+      "$ref": "#/$defs/TranscriptPartialEvent"
+    },
+    {
+      "$ref": "#/$defs/TranscriptFinalEvent"
+    },
+    {
+      "$ref": "#/$defs/PaceUpdateEvent"
+    },
+    {
+      "$ref": "#/$defs/FeedbackUpdateEvent"
+    },
+    {
+      "$ref": "#/$defs/SessionSummaryEvent"
+    },
+    {
+      "$ref": "#/$defs/DebugStateEvent"
+    },
+    {
+      "$ref": "#/$defs/ErrorEvent"
+    }
+  ],
+  "$defs": {
+    "Envelope": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": "1.0"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "version",
+        "timestamp"
+      ],
+      "additionalProperties": false
+    },
+    "SessionStartPayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "client": {
+          "type": "string"
+        },
+        "replayMode": {
+          "type": "boolean"
+        },
+        "locale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "client"
+      ],
+      "additionalProperties": false
+    },
+    "AudioChunkPayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "sampleRateHz": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "channelCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dataBase64": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "sequence",
+        "sampleRateHz",
+        "durationMs"
+      ],
+      "additionalProperties": false
+    },
+    "SessionStopPayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "additionalProperties": false
+    },
+    "TranscriptPartialPayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sessionId",
+        "text",
+        "sequence"
+      ],
+      "additionalProperties": false
+    },
+    "TranscriptFinalPayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "utteranceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "text",
+        "utteranceId"
+      ],
+      "additionalProperties": false
+    },
+    "PaceUpdatePayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "wordsPerMinute": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "band": {
+          "type": "string",
+          "enum": [
+            "slow",
+            "on_target",
+            "fast",
+            "unknown"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "band",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "FeedbackUpdatePayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "nudge",
+            "warning"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "severity",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "SessionSummaryPayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transcriptSegments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "averageWpm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "sessionId",
+        "durationMs",
+        "transcriptSegments",
+        "notes"
+      ],
+      "additionalProperties": false
+    },
+    "DebugStatePayload": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorPayload": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "SessionStartEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.start"
+            },
+            "payload": {
+              "$ref": "#/$defs/SessionStartPayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "AudioChunkEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "audio.chunk"
+            },
+            "payload": {
+              "$ref": "#/$defs/AudioChunkPayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "SessionStopEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.stop"
+            },
+            "payload": {
+              "$ref": "#/$defs/SessionStopPayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "TranscriptPartialEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "transcript.partial"
+            },
+            "payload": {
+              "$ref": "#/$defs/TranscriptPartialPayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "TranscriptFinalEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "transcript.final"
+            },
+            "payload": {
+              "$ref": "#/$defs/TranscriptFinalPayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "PaceUpdateEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pace.update"
+            },
+            "payload": {
+              "$ref": "#/$defs/PaceUpdatePayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "FeedbackUpdateEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "feedback.update"
+            },
+            "payload": {
+              "$ref": "#/$defs/FeedbackUpdatePayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "SessionSummaryEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.summary"
+            },
+            "payload": {
+              "$ref": "#/$defs/SessionSummaryPayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "DebugStateEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "debug.state"
+            },
+            "payload": {
+              "$ref": "#/$defs/DebugStatePayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    },
+    "ErrorEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "error"
+            },
+            "payload": {
+              "$ref": "#/$defs/ErrorPayload"
+            }
+          },
+          "required": [
+            "type",
+            "payload"
+          ]
+        }
+      ]
+    }
+  }
+}

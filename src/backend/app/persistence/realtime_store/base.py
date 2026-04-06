@@ -1,0 +1,13 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class RealtimeStore(Protocol):
+    async def put_state(self, session_id: str, state: dict[str, Any]) -> None: ...
+
+    async def get_state(self, session_id: str) -> dict[str, Any] | None: ...
+
+    async def delete_state(self, session_id: str) -> None: ...
+
+    async def close(self) -> None: ...
