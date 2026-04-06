@@ -42,4 +42,4 @@ Versioning rules:
 - envelope version is carried in every message via `version`
 - breaking changes should create a new schema file and mirrored language bindings
 
-Replay and recorded-audio testing are intentionally not implemented yet. The schema and backend boundaries leave room for that next iteration.
+Replay and recorded-audio testing now run through the same backend session pipeline used by live mode, and the schema includes explicit pace, feedback, summary, and debug payloads to keep replay, websocket state, and history views aligned.

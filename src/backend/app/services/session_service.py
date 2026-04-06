@@ -14,6 +14,8 @@ from speechpilot_contracts.events import (
     DebugStatePayload,
     ErrorEvent,
     ErrorPayload,
+    FeedbackUpdateEvent,
+    FeedbackUpdatePayload,
     PaceUpdateEvent,
     PaceUpdatePayload,
     ServerEvent,
@@ -28,6 +30,7 @@ from speechpilot_contracts.events import (
 from app.domain.session import SessionContext
 from app.domain.session_metrics import SessionMetricsSnapshot
 from app.domain.transcript import TranscriptSegment
+from app.domain.feedback import CoachingFeedback
 from app.persistence.repository import SessionRepository
 from app.persistence.realtime_store.base import RealtimeStore
 from app.providers.stt import SpeechToTextProvider, SpeechToTextProviderError
@@ -178,7 +181,6 @@ class RealtimeSessionService:
 
         emitted_events = await self._finalize_provider_events(runtime, provider_events, emit_debug=False)
 
-        await self._coaching_service.on_session_stop(session)
         analytics_snapshot = self._analytics_service.get_snapshot(session.session_id)
         final_pace_snapshot = await self._pace_service.end_session(
             session_id=session.session_id,
@@ -187,6 +189,7 @@ class RealtimeSessionService:
         runtime.last_pace_snapshot = final_pace_snapshot
         metrics = self._build_metrics_snapshot(session.session_id, final_pace_snapshot)
         await self._session_repository.upsert_session_metrics(session, metrics)
+        await self._coaching_service.on_session_stop(session)
         debug_event = await self._build_debug_event(
             runtime,
             lifecycle=status,
@@ -334,6 +337,10 @@ class RealtimeSessionService:
                             )
                         )
                     )
+                    feedback = await self._coaching_service.on_pace_update(session, pace_snapshot)
+                    if feedback is not None:
+                        emitted_events.append(self._build_feedback_event(feedback))
+                        await self._session_repository.append_feedback_event(session, feedback)
 
         metrics = await self._current_metrics(runtime)
         await self._session_repository.upsert_session_metrics(session, metrics)
@@ -361,6 +368,7 @@ class RealtimeSessionService:
         pace_snapshot: PaceSnapshot,
     ) -> SessionMetricsSnapshot:
         analytics_snapshot = self._analytics_service.get_snapshot(session_id)
+        coaching_snapshot = self._coaching_service.current_snapshot(session_id)
         return SessionMetricsSnapshot(
             chunks_received=analytics_snapshot.chunk_count,
             partial_updates=analytics_snapshot.partial_updates,
@@ -371,6 +379,10 @@ class RealtimeSessionService:
             speaking_duration_ms=pace_snapshot.speaking_duration_ms,
             silence_duration_ms=pace_snapshot.silence_duration_ms,
             pace_band=pace_snapshot.band,
+            feedback_count=coaching_snapshot.feedback_count,
+            last_feedback_decision=coaching_snapshot.last_feedback_decision,
+            last_feedback_reason=coaching_snapshot.last_feedback_reason,
+            last_feedback_confidence=coaching_snapshot.last_feedback_confidence,
         )
 
     async def _build_debug_event(
@@ -393,6 +405,10 @@ class RealtimeSessionService:
                 totalWords=metrics.total_words,
                 wordsPerMinute=metrics.words_per_minute,
                 paceBand=metrics.pace_band,
+                feedbackCount=metrics.feedback_count,
+                lastFeedbackDecision=metrics.last_feedback_decision,
+                lastFeedbackReason=metrics.last_feedback_reason,
+                lastFeedbackConfidence=metrics.last_feedback_confidence,
                 detail=detail,
             )
         )
@@ -411,8 +427,22 @@ class RealtimeSessionService:
                 "totalWords": debug_payload.totalWords,
                 "wordsPerMinute": debug_payload.wordsPerMinute,
                 "paceBand": debug_payload.paceBand,
+                "feedbackCount": debug_payload.feedbackCount,
+                "lastFeedbackDecision": debug_payload.lastFeedbackDecision,
+                "lastFeedbackReason": debug_payload.lastFeedbackReason,
+                "lastFeedbackConfidence": debug_payload.lastFeedbackConfidence,
                 "detail": debug_payload.detail,
             },
+        )
+
+    def _build_feedback_event(self, feedback: CoachingFeedback) -> FeedbackUpdateEvent:
+        return FeedbackUpdateEvent(
+            payload=FeedbackUpdatePayload(
+                sessionId=feedback.session_id,
+                decision=feedback.decision,
+                reason=feedback.reason,
+                confidence=feedback.confidence,
+            )
         )
 
     def _should_emit_debug(

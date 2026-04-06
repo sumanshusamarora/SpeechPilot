@@ -61,9 +61,9 @@ export interface PaceUpdatePayload {
 
 export interface FeedbackUpdatePayload {
   sessionId: string;
-  severity: "info" | "nudge" | "warning";
-  message: string;
-  rationale?: string | null;
+  decision: "slow_down" | "speed_up" | "good_pace";
+  reason: "wpm_above_threshold" | "wpm_below_threshold" | "wpm_in_target_range";
+  confidence: number;
 }
 
 export interface SessionSummaryPayload {
@@ -89,6 +89,10 @@ export interface DebugStatePayload {
   totalWords: number;
   wordsPerMinute?: number | null;
   paceBand: "slow" | "good" | "fast" | "unknown";
+  feedbackCount: number;
+  lastFeedbackDecision?: "slow_down" | "speed_up" | "good_pace" | null;
+  lastFeedbackReason?: "wpm_above_threshold" | "wpm_below_threshold" | "wpm_in_target_range" | null;
+  lastFeedbackConfidence?: number | null;
   detail?: string | null;
 }
 

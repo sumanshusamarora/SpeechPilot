@@ -35,38 +35,64 @@ export interface TranscriptPartialPayload {
   sequence: number;
 }
 
+export interface TranscriptSegment {
+  id: string;
+  text: string;
+  startTimeMs: number;
+  endTimeMs: number;
+  wordCount: number;
+}
+
 export interface TranscriptFinalPayload {
   sessionId: string;
-  text: string;
-  utteranceId: string;
+  segment: TranscriptSegment;
 }
 
 export interface PaceUpdatePayload {
   sessionId: string;
-  wordsPerMinute?: number | null;
-  band: "slow" | "on_target" | "fast" | "unknown";
+  wordsPerMinute: number;
+  band: "slow" | "good" | "fast" | "unknown";
   source: string;
+  totalWords: number;
+  speakingDurationMs: number;
+  silenceDurationMs: number;
+  windowDurationMs: number;
 }
 
 export interface FeedbackUpdatePayload {
   sessionId: string;
-  severity: "info" | "nudge" | "warning";
-  message: string;
-  rationale?: string | null;
+  decision: "slow_down" | "speed_up" | "good_pace";
+  reason: "wpm_above_threshold" | "wpm_below_threshold" | "wpm_in_target_range";
+  confidence: number;
 }
 
 export interface SessionSummaryPayload {
   sessionId: string;
   durationMs: number;
   transcriptSegments: number;
+  totalWords: number;
   averageWpm?: number | null;
+  speakingDurationMs: number;
+  silenceDurationMs: number;
+  paceBand: "slow" | "good" | "fast" | "unknown";
   notes: string[];
 }
 
 export interface DebugStatePayload {
   sessionId?: string | null;
-  scope: string;
-  state: string;
+  lifecycle: string;
+  activeProvider?: string | null;
+  replayMode?: boolean | null;
+  chunksReceived: number;
+  partialUpdates: number;
+  finalSegments: number;
+  totalWords: number;
+  wordsPerMinute?: number | null;
+  paceBand: "slow" | "good" | "fast" | "unknown";
+  feedbackCount: number;
+  lastFeedbackDecision?: "slow_down" | "speed_up" | "good_pace" | null;
+  lastFeedbackReason?: "wpm_above_threshold" | "wpm_below_threshold" | "wpm_in_target_range" | null;
+  lastFeedbackConfidence?: number | null;
   detail?: string | null;
 }
 
@@ -139,4 +165,5 @@ export type ServerEvent =
   | ErrorEvent;
 
 export declare function createSessionStartEvent(sessionId: string): SessionStartEvent;
-export declare function createSessionStopEvent(sessionId: string): SessionStopEvent;
+export declare function createAudioChunkEvent(payload: AudioChunkPayload): AudioChunkEvent;
+export declare function createSessionStopEvent(sessionId: string, reason?: string): SessionStopEvent;

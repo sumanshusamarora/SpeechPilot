@@ -45,6 +45,10 @@ class SessionModel(Base):
         back_populates="session",
         cascade="all, delete-orphan",
     )
+    feedback_events: Mapped[list[FeedbackEventModel]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
 
 
 class TranscriptEventModel(Base):
@@ -104,6 +108,31 @@ class SessionMetricModel(Base):
     speaking_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     silence_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     pace_band: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    feedback_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_feedback_decision: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_feedback_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_feedback_confidence: Mapped[float | None] = mapped_column(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
 
     session: Mapped[SessionModel] = relationship(back_populates="metrics")
+
+
+class FeedbackEventModel(Base):
+    __tablename__ = "feedback_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("sessions.session_id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    observed_wpm: Mapped[float] = mapped_column(nullable=False)
+    pace_band: Mapped[str] = mapped_column(String(16), nullable=False)
+    total_words: Mapped[int] = mapped_column(Integer, nullable=False)
+    speaking_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now)
+
+    session: Mapped[SessionModel] = relationship(back_populates="feedback_events")

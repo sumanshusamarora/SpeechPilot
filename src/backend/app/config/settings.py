@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     pace_smoothing_factor: float = 0.35
     pace_slow_threshold_wpm: float = 100.0
     pace_fast_threshold_wpm: float = 125.0
+    coaching_sustain_segments: int = 2
+    coaching_cooldown_ms: int = 12000
+    coaching_min_words_for_feedback: int = 8
     debug_snapshot_chunk_interval: int = 10
 
 

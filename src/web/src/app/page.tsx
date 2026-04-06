@@ -1,5 +1,5 @@
-import { SessionDebugShell } from "@/components/session-debug-shell";
+import { LandingPage } from "@/components/landing-page";
 
 export default function HomePage() {
-  return <SessionDebugShell />;
+  return <LandingPage />;
 }

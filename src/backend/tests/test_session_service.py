@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import io
 import logging
+from typing import cast
 import wave
 
 import pytest
 
 from speechpilot_contracts.events import (
     AudioChunkPayload,
+    FeedbackUpdateEvent,
     SessionSummaryPayload,
     TranscriptSegmentPayload,
     TranscriptFinalEvent,
@@ -19,6 +21,7 @@ from speechpilot_contracts.events import (
 from app.domain.session_metrics import SessionMetricsSnapshot
 from app.domain.transcript import TranscriptSegment
 from app.persistence.realtime_store.managed import ManagedRealtimeStorePlaceholder
+from app.persistence.repository import SessionHistoryDetail, SessionHistorySummary
 from app.services.analytics import AnalyticsService
 from app.services.coaching import CoachingService
 from app.services.pace import PaceAnalyticsService
@@ -30,6 +33,7 @@ class FakeSessionRepository:
         self.opened_sessions: list[tuple[str, str]] = []
         self.persisted_segments: list[TranscriptSegment] = []
         self.metric_snapshots: list[SessionMetricsSnapshot] = []
+        self.feedback_events: list[tuple[str, str]] = []
         self.closed_summaries: list[tuple[SessionSummaryPayload, str, str | None]] = []
 
     async def open_session(self, session, provider_name: str) -> None:
@@ -43,6 +47,22 @@ class FakeSessionRepository:
     async def upsert_session_metrics(self, session, metrics: SessionMetricsSnapshot) -> None:
         del session
         self.metric_snapshots.append(metrics)
+
+    async def append_feedback_event(self, session, feedback) -> None:
+        del session
+        self.feedback_events.append((feedback.decision, feedback.reason))
+
+    async def list_sessions(self, limit: int = 20) -> list[SessionHistorySummary]:
+        del limit
+        return []
+
+    async def get_session(self, session_id: str) -> SessionHistoryDetail | None:
+        del session_id
+        return None
+
+    async def delete_session(self, session_id: str) -> bool:
+        del session_id
+        return False
 
     async def close_session(self, session, summary: SessionSummaryPayload, *, status: str, stop_reason: str | None) -> None:
         del session
@@ -97,7 +117,7 @@ def build_pcm16_wav_bytes(*, sample_rate_hz: int, duration_ms: int) -> bytes:
     samples = [0] * frame_count
 
     buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
+    with cast(wave.Wave_write, wave.open(buffer, "wb")) as wav_file:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
         wav_file.setframerate(sample_rate_hz)
@@ -121,7 +141,13 @@ async def test_run_replay_persists_summary_and_transcript_events() -> None:
             slow_threshold_wpm=110,
             fast_threshold_wpm=160,
         ),
-        coaching_service=CoachingService(),
+        coaching_service=CoachingService(
+            slow_threshold_wpm=110,
+            fast_threshold_wpm=160,
+            sustain_segments=1,
+            cooldown_ms=0,
+            min_words_for_feedback=0,
+        ),
         replay_chunk_duration_ms=250,
         replay_chunk_delay_ms=0,
         debug_snapshot_chunk_interval=4,
@@ -148,11 +174,14 @@ async def test_run_replay_persists_summary_and_transcript_events() -> None:
         "final transcript",
     ]
     assert any(event.type == "pace.update" for event in result.events)
+    assert any(isinstance(event, FeedbackUpdateEvent) for event in result.events)
     assert any(event.type == "debug.state" for event in result.events)
     assert repository.opened_sessions == [(result.session_id, "fake-stt")]
     assert [segment.text for segment in repository.persisted_segments] == ["final transcript"]
+    assert repository.feedback_events == [("good_pace", "wpm_in_target_range")]
     assert repository.metric_snapshots[-1].partial_updates == 3
     assert repository.metric_snapshots[-1].final_segments == 1
     assert repository.metric_snapshots[-1].total_words == 2
+    assert repository.metric_snapshots[-1].feedback_count == 1
     assert repository.closed_summaries[0][0].sessionId == result.session_id
     assert repository.closed_summaries[0][1] == "completed"

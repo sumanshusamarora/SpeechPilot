@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { replayFeature } from "@/features/replay/replay-mode";
@@ -8,6 +9,7 @@ import { useWebsocketSession } from "@/hooks/use-websocket-session";
 import type {
   DebugStateEvent,
   DebugStatePayload,
+  FeedbackUpdateEvent,
   PaceUpdateEvent,
   ServerEvent,
   TranscriptFinalEvent,
@@ -67,6 +69,35 @@ function getLatestReplayDebugState(events: ServerEvent[] | undefined) {
   return null;
 }
 
+function getLatestReplayFeedbackEvent(events: ServerEvent[] | undefined) {
+  if (!events) {
+    return null as FeedbackUpdateEvent | null;
+  }
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.type === "feedback.update") {
+      return event as FeedbackUpdateEvent;
+    }
+  }
+  return null;
+}
+
+function describeFeedback(decision?: string | null, reason?: string | null) {
+  if (!decision) {
+    return "Waiting for steady pace data.";
+  }
+  if (decision === "slow_down") {
+    return "Slow down. Your speaking rate is above the target range.";
+  }
+  if (decision === "speed_up") {
+    return "Speed up a little. Your speaking rate is below the target range.";
+  }
+  if (reason === "wpm_in_target_range") {
+    return "Good pace. You are staying in the target speaking range.";
+  }
+  return "Coaching feedback available.";
+}
+
 export function SessionDebugShell() {
   const [selectedReplayFile, setSelectedReplayFile] = useState<File | null>(null);
   const {
@@ -78,6 +109,7 @@ export function SessionDebugShell() {
     disconnect,
     entries,
     finalSegments,
+    feedbackUpdate,
     micErrorMessage,
     paceUpdate,
     partialTranscript,
@@ -90,6 +122,7 @@ export function SessionDebugShell() {
   } = useWebsocketSession();
   const replay = useReplayTranscription();
   const replayPace = getLatestReplayPaceEvent(replay.result?.events);
+  const replayFeedback = getLatestReplayFeedbackEvent(replay.result?.events);
   const replayFinalSegments = getReplayFinalSegments(replay.result?.events);
   const replayDebugState = getLatestReplayDebugState(replay.result?.events);
 
@@ -99,17 +132,22 @@ export function SessionDebugShell() {
         <section className="hero">
           <div className="hero-copy">
             <span className="eyebrow">SpeechPilot v2</span>
-            <h1>Realtime debug surface for the new backend-first stack.</h1>
+            <h1>A local speaking assistant with realtime transcript, pace, and coaching feedback.</h1>
             <p>
-              This shell is intentionally narrow: connect to the FastAPI websocket,
-              push session lifecycle events, and inspect the wire protocol while the
-              transcription and coaching pipeline is still being built.
+              Run live mic sessions or replay WAV files through the same backend pipeline,
+              then review pace signals, coaching decisions, and full session history without
+              leaving the browser.
             </p>
           </div>
-          <div className="hero-badges">
-            <span className="badge">Next.js client</span>
-            <span className="badge">Shared contracts</span>
-            <span className="badge">Replay-ready boundary</span>
+          <div className="hero-actions">
+            <div className="hero-badges">
+              <span className="badge">Realtime transcript</span>
+              <span className="badge">Deterministic coaching</span>
+              <span className="badge">Session history</span>
+            </div>
+            <Link className="button" href="/history">
+              Open history
+            </Link>
           </div>
         </section>
 
@@ -154,7 +192,7 @@ export function SessionDebugShell() {
             </div>
             <p>
               Start live mic mode to stream browser audio chunks to the backend over
-              websocket and render transcript updates as they arrive.
+              websocket and render transcript updates plus coaching as they arrive.
             </p>
             <div className="control-row">
               <button
@@ -211,6 +249,15 @@ export function SessionDebugShell() {
                 <strong>{paceUpdate?.totalWords ?? summary?.totalWords ?? 0}</strong>
               </article>
             </div>
+            <article className="coaching-card">
+              <span>Live coaching</span>
+              <strong>{describeFeedback(feedbackUpdate?.decision, feedbackUpdate?.reason)}</strong>
+              <small>
+                {feedbackUpdate
+                  ? `${Math.round(feedbackUpdate.confidence * 100)}% confidence`
+                  : "Feedback appears after sustained pace observations."}
+              </small>
+            </article>
             <div className="transcript-list">
               {finalSegments.map((segment) => (
                 <article className="transcript-item" key={segment.id}>
@@ -251,7 +298,24 @@ export function SessionDebugShell() {
                 <span>Debug WPM</span>
                 <strong>{debugState?.wordsPerMinute ?? "-"}</strong>
               </div>
+              <div className="meta-item">
+                <span>Feedback count</span>
+                <strong>{debugState?.feedbackCount ?? 0}</strong>
+              </div>
+              <div className="meta-item">
+                <span>Last feedback</span>
+                <strong>{debugState?.lastFeedbackDecision ?? "-"}</strong>
+              </div>
             </div>
+            <article className="coaching-card coaching-card-subtle">
+              <span>Last feedback reason</span>
+              <strong>{describeFeedback(debugState?.lastFeedbackDecision, debugState?.lastFeedbackReason)}</strong>
+              <small>
+                {debugState?.lastFeedbackConfidence != null
+                  ? `${Math.round(debugState.lastFeedbackConfidence * 100)}% confidence`
+                  : "No persisted feedback yet."}
+              </small>
+            </article>
             {debugState?.detail ? <p>{debugState.detail}</p> : null}
           </article>
 
@@ -312,6 +376,15 @@ export function SessionDebugShell() {
                 <strong>{replayDebugState?.chunksReceived ?? 0}</strong>
               </article>
             </div>
+            <article className="coaching-card">
+              <span>Replay coaching</span>
+              <strong>{describeFeedback(replayFeedback?.payload.decision, replayFeedback?.payload.reason)}</strong>
+              <small>
+                {replayFeedback
+                  ? `${Math.round(replayFeedback.payload.confidence * 100)}% confidence`
+                  : "Replay feedback appears when pace is sustained."}
+              </small>
+            </article>
             {replay.errorMessage ? <p>{replay.errorMessage}</p> : null}
             <div className="transcript-list">
               {replayFinalSegments.map((event) => (

@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 PROTOCOL_VERSION = "1.0"
 PaceBand = Literal["slow", "good", "fast", "unknown"]
+FeedbackDecision = Literal["slow_down", "speed_up", "good_pace"]
+FeedbackReason = Literal["wpm_above_threshold", "wpm_below_threshold", "wpm_in_target_range"]
 
 
 def _utc_now() -> datetime:
@@ -90,9 +92,9 @@ class FeedbackUpdatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sessionId: str
-    severity: Literal["info", "nudge", "warning"] = "info"
-    message: str
-    rationale: str | None = None
+    decision: FeedbackDecision
+    reason: FeedbackReason
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class SessionSummaryPayload(BaseModel):
@@ -122,6 +124,10 @@ class DebugStatePayload(BaseModel):
     totalWords: int = 0
     wordsPerMinute: float | None = None
     paceBand: PaceBand = "unknown"
+    feedbackCount: int = 0
+    lastFeedbackDecision: FeedbackDecision | None = None
+    lastFeedbackReason: FeedbackReason | None = None
+    lastFeedbackConfidence: float | None = Field(default=None, ge=0.0, le=1.0)
     detail: str | None = None
 
 

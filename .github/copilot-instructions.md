@@ -10,7 +10,7 @@ maintainable, and production-ready.
 
 ## Scope
 
-- This repository contains a native Android application and supporting modules.
+- This repository contains an Android application under `src/android` plus supporting backend and web code under `src/`.
 - All processing is expected to run locally unless explicitly stated otherwise.
 - Do not introduce backend services, APIs, or cloud dependencies unless explicitly requested.
 - Do not assume external systems exist unless defined in code or documentation.
@@ -21,18 +21,18 @@ maintainable, and production-ready.
 
 Follow the existing module structure. Do not introduce parallel structures.
 
-Expected modules:
+Expected Android modules:
 
-- `app/` → application entrypoint and wiring
-- `ui/` → screens, composables, view models
-- `session/` → lifecycle and orchestration
-- `audio/` → microphone capture and audio frames
-- `vad/` → speech activity detection
-- `segmentation/` → speech segment buffering
-- `pace/` → rate estimation and rolling metrics
-- `feedback/` → decisioning and output
-- `data/` → persistence (Room / repositories)
-- `settings/` → user configuration
+- `src/android/app/` → application entrypoint and wiring
+- `src/android/ui/` → screens, composables, view models
+- `src/android/session/` → lifecycle and orchestration
+- `src/android/audio/` → microphone capture and audio frames
+- `src/android/vad/` → speech activity detection
+- `src/android/segmentation/` → speech segment buffering
+- `src/android/pace/` → rate estimation and rolling metrics
+- `src/android/feedback/` → decisioning and output
+- `src/android/data/` → persistence (Room / repositories)
+- `src/android/settings/` → user configuration
 
 If structure evolves, follow existing patterns instead of introducing new ones.
 
@@ -106,12 +106,12 @@ Avoid:
 Run relevant checks after changes:
 
 ```bash
-./gradlew lint
-./gradlew test
+./src/android/gradlew lint
+./src/android/gradlew test
 
 For build validation:
 
-./gradlew assembleDebug
+./src/android/gradlew assembleDebug
 
 Prefer:
 

@@ -47,7 +47,13 @@ def build_container(settings: Settings | None = None) -> ServiceContainer:
         slow_threshold_wpm=resolved_settings.pace_slow_threshold_wpm,
         fast_threshold_wpm=resolved_settings.pace_fast_threshold_wpm,
     )
-    coaching_service = CoachingService()
+    coaching_service = CoachingService(
+        slow_threshold_wpm=resolved_settings.pace_slow_threshold_wpm,
+        fast_threshold_wpm=resolved_settings.pace_fast_threshold_wpm,
+        sustain_segments=resolved_settings.coaching_sustain_segments,
+        cooldown_ms=resolved_settings.coaching_cooldown_ms,
+        min_words_for_feedback=resolved_settings.coaching_min_words_for_feedback,
+    )
     session_service = RealtimeSessionService(
         logger=logger,
         realtime_store=realtime_store,

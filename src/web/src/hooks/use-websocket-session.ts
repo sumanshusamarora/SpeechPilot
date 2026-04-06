@@ -10,6 +10,8 @@ import {
   type ClientEvent,
   type DebugStateEvent,
   type DebugStatePayload,
+  type FeedbackUpdateEvent,
+  type FeedbackUpdatePayload,
   type PaceUpdateEvent,
   type PaceUpdatePayload,
   type SessionSummaryPayload,
@@ -24,6 +26,10 @@ import { env } from "@/lib/env";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 type SessionState = "idle" | "starting" | "capturing" | "stopping" | "error";
+
+interface UseWebsocketSessionOptions {
+  sessionPrefix?: string;
+}
 
 type LogDirection = "in" | "out" | "system";
 
@@ -40,24 +46,27 @@ interface FinalTranscriptSegment extends TranscriptSegment {
 
 const MAX_LOG_ENTRIES = 40;
 
-function buildDefaultSessionId() {
-  return `debug-${Date.now()}`;
+function buildDefaultSessionId(prefix = "live") {
+  const normalizedPrefix = prefix.trim() || "live";
+  return `${normalizedPrefix}-${Date.now()}`;
 }
 
-export function useWebsocketSession() {
+export function useWebsocketSession(options: UseWebsocketSessionOptions = {}) {
   const websocketRef = useRef<WebSocket | null>(null);
   const audioCaptureRef = useRef<BrowserAudioCapture | null>(null);
   const sequenceRef = useRef(0);
   const connectionPromiseRef = useRef<Promise<void> | null>(null);
   const sessionStateRef = useRef<SessionState>("idle");
+  const generatedSessionIdRef = useRef(buildDefaultSessionId(options.sessionPrefix));
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [sessionId, setSessionId] = useState(buildDefaultSessionId);
+  const [sessionId, setSessionId] = useState(generatedSessionIdRef.current);
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("disconnected");
   const [sessionState, setSessionState] = useState<SessionState>("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
   const [finalSegments, setFinalSegments] = useState<FinalTranscriptSegment[]>([]);
   const [paceUpdate, setPaceUpdate] = useState<PaceUpdatePayload | null>(null);
+  const [feedbackUpdate, setFeedbackUpdate] = useState<FeedbackUpdatePayload | null>(null);
   const [debugState, setDebugState] = useState<DebugStatePayload | null>(null);
   const [summary, setSummary] = useState<SessionSummaryPayload | null>(null);
   const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
@@ -108,6 +117,11 @@ export function useWebsocketSession() {
     if (event.type === "pace.update") {
       const payload = event as PaceUpdateEvent;
       setPaceUpdate(payload.payload);
+      return;
+    }
+    if (event.type === "feedback.update") {
+      const payload = event as FeedbackUpdateEvent;
+      setFeedbackUpdate(payload.payload);
       return;
     }
     if (event.type === "debug.state") {
@@ -188,6 +202,17 @@ export function useWebsocketSession() {
     websocketRef.current?.close();
   };
 
+  useEffect(() => {
+    const nextGeneratedSessionId = buildDefaultSessionId(options.sessionPrefix);
+    setSessionId((currentSessionId) => {
+      if (currentSessionId === generatedSessionIdRef.current) {
+        return nextGeneratedSessionId;
+      }
+      return currentSessionId;
+    });
+    generatedSessionIdRef.current = nextGeneratedSessionId;
+  }, [options.sessionPrefix]);
+
   const send = (event: ClientEvent) => {
     if (websocketRef.current?.readyState !== WebSocket.OPEN) {
       appendLog("system", { message: "Cannot send event while websocket is disconnected." });
@@ -199,12 +224,14 @@ export function useWebsocketSession() {
   };
 
   const startLiveSession = async () => {
-    const nextSessionId = sessionId.trim() || buildDefaultSessionId();
+    const nextSessionId = sessionId.trim() || buildDefaultSessionId(options.sessionPrefix);
+    generatedSessionIdRef.current = nextSessionId;
     sequenceRef.current = 0;
     setSessionId(nextSessionId);
     setPartialTranscript("");
     setFinalSegments([]);
     setPaceUpdate(null);
+    setFeedbackUpdate(null);
     setDebugState(null);
     setSummary(null);
     setMicErrorMessage(null);
@@ -270,6 +297,7 @@ export function useWebsocketSession() {
     entries,
     finalSegments,
     debugState,
+    feedbackUpdate,
     micErrorMessage,
     paceUpdate,
     partialTranscript,

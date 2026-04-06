@@ -38,7 +38,7 @@ jobs:
           cache: gradle
 
       - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+        run: chmod +x src/android/gradlew
 
       - name: Decode keystore
         run: |
@@ -50,20 +50,20 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./src/android/gradlew assembleRelease --no-daemon
 
       - name: Locate and rename signed APK
         id: locate_apk
         run: |
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#release-}"
-          SIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" ! -name "*-unsigned.apk" | head -1)
+          SIGNED_APK=$(find src/android/app/build/outputs/apk/release -name "*.apk" ! -name "*-unsigned.apk" | head -1)
           if [ -z "$SIGNED_APK" ]; then
-            echo "ERROR: No signed APK found in app/build/outputs/apk/release"
-            find app/build/outputs/apk/release -name "*.apk" || true
+            echo "ERROR: No signed APK found in src/android/app/build/outputs/apk/release"
+            find src/android/app/build/outputs/apk/release -name "*.apk" || true
             exit 1
           fi
-          DEST="app/build/outputs/apk/release/SpeechPilot-${VERSION}-release.apk"
+          DEST="src/android/app/build/outputs/apk/release/SpeechPilot-${VERSION}-release.apk"
           mv "$SIGNED_APK" "$DEST"
           echo "apk_path=${DEST}" >> "$GITHUB_OUTPUT"
           echo "Signed APK: ${DEST}"

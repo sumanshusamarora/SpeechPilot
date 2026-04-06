@@ -506,10 +506,10 @@ Gemma 4 E2B support in a future iteration requires only:
 ### Changes
 
 - [x] **CMake/JNI native packaging** (`transcription`)
-  - `transcription/src/main/cpp/CMakeLists.txt`: uses `FetchContent` to pull whisper.cpp v1.7.2 from GitHub during `./gradlew assembleDebug` CMake configure
+  - `src/android/transcription/src/main/cpp/CMakeLists.txt`: uses `FetchContent` to pull whisper.cpp v1.7.2 from GitHub during `./src/android/gradlew assembleDebug` CMake configure
   - `transcription/src/main/cpp/whisper_jni.cpp`: JNI bridge matching `WhisperNative.kt` `external` function signatures
   - `transcription/build.gradle.kts`: adds `externalNativeBuild { cmake { path } }`, `ndkVersion = "26.3.11579264"`, `ndk.abiFilters = ["arm64-v8a", "x86_64"]`
-  - No manual build step required: first `./gradlew assembleDebug` downloads and compiles whisper.cpp automatically
+  - No manual build step required: first `./src/android/gradlew assembleDebug` downloads and compiles whisper.cpp automatically
 
 - [x] **Model metadata** (`modelmanager/LocalModelDescriptor`)
   - Added `displayName: String`, `approxSizeMb: Int`, `wifiRecommended: Boolean`

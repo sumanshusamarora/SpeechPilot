@@ -14,12 +14,11 @@ The repository currently contains both the existing implementation and the new s
 
 ```text
 repo root/
-  app/, ui/, session/, ...   # legacy Android-first v1
   src/
+    android/                 # Android client and supporting modules
     backend/                 # FastAPI backend scaffold
-    web/                     # Next.js debug shell
+    web/                     # Next.js speaking-assistant shell
     contracts/               # shared event contracts
-    android/                 # future thin Android client migration target
   infra/
     docker/                  # local development environment
 ```
@@ -83,8 +82,9 @@ The stable realtime pipeline is now:
 1. websocket transport receives `session.start`, `audio.chunk`, and `session.stop`
 2. the STT provider emits ephemeral `transcript.partial` plus append-only `transcript.final` segments
 3. the pace service consumes finalized transcript segments only and emits `pace.update`
-4. the session service emits structured `debug.state` snapshots and `session.summary`
-5. persistence stores final transcript segments and session metrics, not partial transcript text
+4. the coaching service consumes paced transcript updates and emits deterministic `feedback.update`
+5. the session service emits structured `debug.state` snapshots and `session.summary`
+6. persistence stores final transcript segments, feedback events, and session metrics, not partial transcript text
 
 ## Realtime store direction
 
@@ -133,15 +133,16 @@ Transcript model rules:
 
 Location: `src/web`
 
-The web client is initially a developer-facing debug surface. It is not yet the product UI.
+The web client is now a thin product-facing shell for the backend pipeline.
 
 Current responsibilities:
 
 - connect to backend websocket
 - capture microphone audio in the browser
-- render partial transcript, final segments, pace, and debug state
-- upload replay WAV files and inspect the returned event stream
-- render incoming and outgoing websocket logs for debugging
+- render live transcript, pace, coaching feedback, and debug state
+- upload replay WAV files and inspect transcript, pace, and coaching results from the returned event stream
+- browse and delete persisted session history via REST endpoints
+- keep raw event logs available for transport debugging when needed
 
 ## Replay/testing direction
 
@@ -171,7 +172,7 @@ Goals:
 1. Scaffold backend, web, contracts, and local infrastructure in parallel under `src/`.
 2. Validate websocket contracts and backend session orchestration.
 3. Add real STT, analytics, coaching, and replay capabilities incrementally.
-4. Migrate Android into `src/android` as a thin realtime client later.
+4. Continue evolving `src/android` as the thin Android client alongside the backend-first stack.
 
 ## Non-goals for this scaffold
 
