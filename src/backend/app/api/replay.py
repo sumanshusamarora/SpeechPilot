@@ -50,5 +50,5 @@ async def transcribe_replay(
         "sessionId": replay_result.session_id,
         "provider": container.stt_provider.provider_name,
         "summary": replay_result.summary.model_dump(mode="json"),
-        "events": [dump_event(event) for event in replay_result.transcript_events],
+        "events": [dump_event(event) for event in replay_result.events],
     }

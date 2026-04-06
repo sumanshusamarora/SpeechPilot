@@ -8,15 +8,13 @@ from typing import Protocol
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from speechpilot_contracts.events import (
-    SessionSummaryPayload,
-    TranscriptFinalEvent,
-    TranscriptPartialEvent,
-)
+from speechpilot_contracts.events import SessionSummaryPayload
 
 from app.domain.session import SessionContext
+from app.domain.session_metrics import SessionMetricsSnapshot
+from app.domain.transcript import TranscriptSegment
 from app.persistence.db import build_sqlalchemy_url
-from app.persistence.models import SessionModel, TranscriptEventModel
+from app.persistence.models import SessionMetricModel, SessionModel, TranscriptSegmentModel
 
 
 def _utc_now() -> datetime:
@@ -26,17 +24,26 @@ def _utc_now() -> datetime:
 class SessionRepository(Protocol):
     async def open_session(self, session: SessionContext, provider_name: str) -> None: ...
 
-    async def append_transcript_events(
+    async def append_transcript_segments(
         self,
         session: SessionContext,
-        events: list[TranscriptPartialEvent | TranscriptFinalEvent],
+        segments: list[TranscriptSegment],
         provider_name: str,
+    ) -> None: ...
+
+    async def upsert_session_metrics(
+        self,
+        session: SessionContext,
+        metrics: SessionMetricsSnapshot,
     ) -> None: ...
 
     async def close_session(
         self,
         session: SessionContext,
         summary: SessionSummaryPayload,
+        *,
+        status: str,
+        stop_reason: str | None,
     ) -> None: ...
 
     async def close(self) -> None: ...
@@ -64,7 +71,9 @@ class SqlAlchemySessionRepository:
                 existing.replay_mode = session.replay_mode
                 existing.provider = provider_name
                 existing.status = "active"
+                existing.stop_reason = None
                 existing.started_at = session.started_at
+                existing.ended_at = None
                 existing.updated_at = _utc_now()
                 return
 
@@ -76,79 +85,104 @@ class SqlAlchemySessionRepository:
                     replay_mode=session.replay_mode,
                     provider=provider_name,
                     status="active",
+                    stop_reason=None,
                     started_at=session.started_at,
                     created_at=_utc_now(),
                     updated_at=_utc_now(),
                 )
             )
 
-    async def append_transcript_events(
+    async def append_transcript_segments(
         self,
         session: SessionContext,
-        events: list[TranscriptPartialEvent | TranscriptFinalEvent],
+        segments: list[TranscriptSegment],
         provider_name: str,
     ) -> None:
-        if not events:
+        if not segments:
             return
-        await asyncio.to_thread(self._append_transcript_events_sync, session, events, provider_name)
+        await asyncio.to_thread(self._append_transcript_segments_sync, session, segments, provider_name)
 
-    def _append_transcript_events_sync(
+    def _append_transcript_segments_sync(
         self,
         session: SessionContext,
-        events: list[TranscriptPartialEvent | TranscriptFinalEvent],
+        segments: list[TranscriptSegment],
         provider_name: str,
     ) -> None:
         with self._session_factory.begin() as db_session:
             session_row = db_session.get(SessionModel, session.session_id)
             if session_row is None:
-                self._logger.warning("append_transcript_events called for unknown session_id=%s", session.session_id)
+                self._logger.warning("append_transcript_segments called for unknown session_id=%s", session.session_id)
                 return
 
             timestamp = _utc_now()
             source_mode = "replay" if session.replay_mode else "live"
-            for event in events:
-                if isinstance(event, TranscriptPartialEvent):
-                    db_session.add(
-                        TranscriptEventModel(
-                            session_id=session.session_id,
-                            event_type="partial",
-                            sequence=event.payload.sequence,
-                            utterance_id=None,
-                            text=event.payload.text,
-                            provider=provider_name,
-                            source_mode=source_mode,
-                            created_at=timestamp,
-                        )
+            for segment in segments:
+                db_session.add(
+                    TranscriptSegmentModel(
+                        session_id=session.session_id,
+                        segment_id=segment.segment_id,
+                        text=segment.text,
+                        start_time_ms=segment.start_time_ms,
+                        end_time_ms=segment.end_time_ms,
+                        word_count=segment.word_count,
+                        provider=provider_name,
+                        source_mode=source_mode,
+                        created_at=timestamp,
                     )
-                    session_row.partial_transcript_text = event.payload.text
-                else:
-                    db_session.add(
-                        TranscriptEventModel(
-                            session_id=session.session_id,
-                            event_type="final",
-                            sequence=None,
-                            utterance_id=event.payload.utteranceId,
-                            text=event.payload.text,
-                            provider=provider_name,
-                            source_mode=source_mode,
-                            created_at=timestamp,
-                        )
-                    )
-                    session_row.partial_transcript_text = None
+                )
 
             session_row.updated_at = timestamp
+
+    async def upsert_session_metrics(
+        self,
+        session: SessionContext,
+        metrics: SessionMetricsSnapshot,
+    ) -> None:
+        await asyncio.to_thread(self._upsert_session_metrics_sync, session, metrics)
+
+    def _upsert_session_metrics_sync(
+        self,
+        session: SessionContext,
+        metrics: SessionMetricsSnapshot,
+    ) -> None:
+        with self._session_factory.begin() as db_session:
+            session_row = db_session.get(SessionModel, session.session_id)
+            if session_row is None:
+                self._logger.warning("upsert_session_metrics called for unknown session_id=%s", session.session_id)
+                return
+
+            metric_row = db_session.get(SessionMetricModel, session.session_id)
+            if metric_row is None:
+                metric_row = SessionMetricModel(session_id=session.session_id)
+                db_session.add(metric_row)
+
+            metric_row.chunks_received = metrics.chunks_received
+            metric_row.partial_updates = metrics.partial_updates
+            metric_row.final_segments = metrics.final_segments
+            metric_row.total_words = metrics.total_words
+            metric_row.current_wpm = metrics.words_per_minute
+            metric_row.average_wpm = metrics.average_wpm
+            metric_row.speaking_duration_ms = metrics.speaking_duration_ms
+            metric_row.silence_duration_ms = metrics.silence_duration_ms
+            metric_row.pace_band = metrics.pace_band
+            metric_row.updated_at = _utc_now()
 
     async def close_session(
         self,
         session: SessionContext,
         summary: SessionSummaryPayload,
+        *,
+        status: str,
+        stop_reason: str | None,
     ) -> None:
-        await asyncio.to_thread(self._close_session_sync, session, summary)
+        await asyncio.to_thread(self._close_session_sync, session, summary, status, stop_reason)
 
     def _close_session_sync(
         self,
         session: SessionContext,
         summary: SessionSummaryPayload,
+        status: str,
+        stop_reason: str | None,
     ) -> None:
         with self._session_factory.begin() as db_session:
             session_row = db_session.get(SessionModel, session.session_id)
@@ -156,17 +190,18 @@ class SqlAlchemySessionRepository:
                 self._logger.warning("close_session called for unknown session_id=%s", session.session_id)
                 return
 
-            session_row.status = "completed"
+            session_row.status = status
+            session_row.stop_reason = stop_reason
             session_row.ended_at = _utc_now()
             session_row.duration_ms = summary.durationMs
             session_row.transcript_segments = summary.transcriptSegments
             session_row.updated_at = _utc_now()
+            session_row.partial_transcript_text = None
 
             final_segments = db_session.scalars(
-                select(TranscriptEventModel.text)
-                .where(TranscriptEventModel.session_id == session.session_id)
-                .where(TranscriptEventModel.event_type == "final")
-                .order_by(TranscriptEventModel.id.asc())
+                select(TranscriptSegmentModel.text)
+                .where(TranscriptSegmentModel.session_id == session.session_id)
+                .order_by(TranscriptSegmentModel.id.asc())
             ).all()
             session_row.final_transcript_text = " ".join(final_segments).strip() or None
 

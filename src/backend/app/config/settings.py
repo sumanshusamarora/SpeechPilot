@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     stt_min_utterance_ms: int = 900
     stt_speech_threshold: float = 0.015
     replay_chunk_duration_ms: int = 500
+    replay_chunk_delay_ms: int = 0
+    pace_window_ms: int = 30000
+    pace_smoothing_factor: float = 0.35
+    pace_slow_threshold_wpm: float = 100.0
+    pace_fast_threshold_wpm: float = 125.0
+    debug_snapshot_chunk_interval: int = 10
+
 
 
 @lru_cache

@@ -287,6 +287,44 @@ input {
   color: var(--text-main);
 }
 
+.transcript-item small {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.metric-strip {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+
+.metric-card {
+  background: rgba(13, 92, 74, 0.06);
+  border: 1px solid rgba(13, 92, 74, 0.12);
+  border-radius: 16px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.metric-card span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  font-size: 1.05rem;
+}
+
+.debug-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
 .log-panel {
   min-height: 420px;
 }

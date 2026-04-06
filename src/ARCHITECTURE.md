@@ -78,6 +78,14 @@ The backend currently exposes:
 - `GET /api/replay/capabilities`
 - `WS /ws`
 
+The stable realtime pipeline is now:
+
+1. websocket transport receives `session.start`, `audio.chunk`, and `session.stop`
+2. the STT provider emits ephemeral `transcript.partial` plus append-only `transcript.final` segments
+3. the pace service consumes finalized transcript segments only and emits `pace.update`
+4. the session service emits structured `debug.state` snapshots and `session.summary`
+5. persistence stores final transcript segments and session metrics, not partial transcript text
+
 ## Realtime store direction
 
 Environment-aware ephemeral state is required for session coordination.
@@ -114,6 +122,13 @@ Current structure:
 
 Short-term rule: mirrored language definitions are acceptable while the scaffolding stabilizes. Long-term direction: generate language bindings from the canonical schema set.
 
+Transcript model rules:
+
+- partial transcript is ephemeral and never persisted
+- final transcript is modeled as immutable transcript segments with stable ids and timing metadata
+- WPM is derived from final transcript segments only
+- replay and live mode use the same event shapes and backend orchestration path
+
 ## Web client responsibilities
 
 Location: `src/web`
@@ -123,27 +138,18 @@ The web client is initially a developer-facing debug surface. It is not yet the 
 Current responsibilities:
 
 - connect to backend websocket
-- send mock session lifecycle events
-- show connection state
-- render incoming and outgoing websocket logs
-
-Deferred responsibilities:
-
-- browser microphone capture
-- replay upload flows
-- product-grade transcript and coaching UX
+- capture microphone audio in the browser
+- render partial transcript, final segments, pace, and debug state
+- upload replay WAV files and inspect the returned event stream
+- render incoming and outgoing websocket logs for debugging
 
 ## Replay/testing direction
 
-Recorded-audio replay is a planned local development path.
+Recorded-audio replay is now the primary local debugging path.
 
-This scaffold reserves replay boundaries through:
-
-- `src/backend/app/api/replay.py`
-- `replayMode` in the contracts layer
-- `src/web/src/features/replay`
-
-Future replay work should reuse the same session lifecycle contracts and analytics/coaching pipeline used by live websocket sessions.
+- replay streams chunked WAV audio through the same session service used by live websocket capture
+- replay emits the same `transcript.partial`, `transcript.final`, `pace.update`, `debug.state`, and `session.summary` event shapes
+- optional replay chunk delay can be enabled to mimic live timing for investigations
 
 ## Local development
 

@@ -29,3 +29,12 @@ Notes:
 - the backend runs `alembic upgrade head` before starting
 - the backend persists the Hugging Face model cache in a named volume so the Whisper model is not re-downloaded every boot
 - first live or replay transcription still needs to download the configured model once
+
+Useful tuning variables in `infra/docker/.env`:
+
+- `SPEECHPILOT_REPLAY_CHUNK_DURATION_MS` controls replay chunk size
+- `SPEECHPILOT_REPLAY_CHUNK_DELAY_MS` adds optional delay between replay chunks to mimic live timing
+- `SPEECHPILOT_PACE_WINDOW_MS` sets the rolling WPM window
+- `SPEECHPILOT_PACE_SMOOTHING_FACTOR` controls EMA smoothing strength
+- `SPEECHPILOT_PACE_SLOW_THRESHOLD_WPM` and `SPEECHPILOT_PACE_FAST_THRESHOLD_WPM` set pace bands
+- `SPEECHPILOT_DEBUG_SNAPSHOT_CHUNK_INTERVAL` controls how often chunk-count-driven debug snapshots are emitted

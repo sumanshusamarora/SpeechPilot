@@ -11,6 +11,7 @@ from app.persistence.realtime_store.factory import build_realtime_store
 from app.providers.stt import FasterWhisperSpeechToTextProvider, SpeechToTextProvider
 from app.services.analytics import AnalyticsService
 from app.services.coaching import CoachingService
+from app.services.pace import PaceAnalyticsService
 from app.services.session_service import RealtimeSessionService
 from app.websocket.gateway import RealtimeGateway
 
@@ -23,6 +24,7 @@ class ServiceContainer:
     session_repository: SessionRepository
     stt_provider: SpeechToTextProvider
     analytics_service: AnalyticsService
+    pace_service: PaceAnalyticsService
     coaching_service: CoachingService
     session_service: RealtimeSessionService
     gateway: RealtimeGateway
@@ -39,6 +41,12 @@ def build_container(settings: Settings | None = None) -> ServiceContainer:
     session_repository = SqlAlchemySessionRepository(resolved_settings.postgres_url, logger)
     stt_provider = FasterWhisperSpeechToTextProvider(resolved_settings, logger)
     analytics_service = AnalyticsService()
+    pace_service = PaceAnalyticsService(
+        window_ms=resolved_settings.pace_window_ms,
+        smoothing_factor=resolved_settings.pace_smoothing_factor,
+        slow_threshold_wpm=resolved_settings.pace_slow_threshold_wpm,
+        fast_threshold_wpm=resolved_settings.pace_fast_threshold_wpm,
+    )
     coaching_service = CoachingService()
     session_service = RealtimeSessionService(
         logger=logger,
@@ -46,8 +54,11 @@ def build_container(settings: Settings | None = None) -> ServiceContainer:
         session_repository=session_repository,
         stt_provider=stt_provider,
         analytics_service=analytics_service,
+        pace_service=pace_service,
         coaching_service=coaching_service,
         replay_chunk_duration_ms=resolved_settings.replay_chunk_duration_ms,
+        replay_chunk_delay_ms=resolved_settings.replay_chunk_delay_ms,
+        debug_snapshot_chunk_interval=resolved_settings.debug_snapshot_chunk_interval,
     )
     gateway = RealtimeGateway(
         logger=logger,
@@ -60,6 +71,7 @@ def build_container(settings: Settings | None = None) -> ServiceContainer:
         session_repository=session_repository,
         stt_provider=stt_provider,
         analytics_service=analytics_service,
+        pace_service=pace_service,
         coaching_service=coaching_service,
         session_service=session_service,
         gateway=gateway,

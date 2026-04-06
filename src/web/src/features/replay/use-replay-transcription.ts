@@ -3,9 +3,8 @@
 import { useState } from "react";
 
 import type {
+  ServerEvent,
   SessionSummaryPayload,
-  TranscriptFinalEvent,
-  TranscriptPartialEvent,
 } from "@/lib/contracts";
 import { env } from "@/lib/env";
 
@@ -13,7 +12,7 @@ export interface ReplayTranscriptionResult {
   sessionId: string;
   provider: string;
   summary: SessionSummaryPayload;
-  events: Array<TranscriptPartialEvent | TranscriptFinalEvent>;
+  events: ServerEvent[];
 }
 
 type ReplayStatus = "idle" | "uploading" | "completed" | "error";

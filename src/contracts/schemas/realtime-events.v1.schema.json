@@ -154,23 +154,50 @@
       ],
       "additionalProperties": false
     },
+    "TranscriptSegmentPayload": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "startTimeMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endTimeMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wordCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "startTimeMs",
+        "endTimeMs",
+        "wordCount"
+      ],
+      "additionalProperties": false
+    },
     "TranscriptFinalPayload": {
       "type": "object",
       "properties": {
         "sessionId": {
           "type": "string"
         },
-        "text": {
-          "type": "string"
-        },
-        "utteranceId": {
-          "type": "string"
+        "segment": {
+          "$ref": "#/$defs/TranscriptSegmentPayload"
         }
       },
       "required": [
         "sessionId",
-        "text",
-        "utteranceId"
+        "segment"
       ],
       "additionalProperties": false
     },
@@ -181,28 +208,46 @@
           "type": "string"
         },
         "wordsPerMinute": {
-          "type": [
-            "number",
-            "null"
-          ]
+          "type": "number"
         },
         "band": {
           "type": "string",
           "enum": [
             "slow",
-            "on_target",
+            "good",
             "fast",
             "unknown"
           ]
         },
         "source": {
           "type": "string"
+        },
+        "totalWords": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "speakingDurationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "silenceDurationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "windowDurationMs": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
         "sessionId",
+        "wordsPerMinute",
         "band",
-        "source"
+        "source",
+        "totalWords",
+        "speakingDurationMs",
+        "silenceDurationMs",
+        "windowDurationMs"
       ],
       "additionalProperties": false
     },
@@ -251,10 +296,31 @@
           "type": "integer",
           "minimum": 0
         },
+        "totalWords": {
+          "type": "integer",
+          "minimum": 0
+        },
         "averageWpm": {
           "type": [
             "number",
             "null"
+          ]
+        },
+        "speakingDurationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "silenceDurationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paceBand": {
+          "type": "string",
+          "enum": [
+            "slow",
+            "good",
+            "fast",
+            "unknown"
           ]
         },
         "notes": {
@@ -268,6 +334,10 @@
         "sessionId",
         "durationMs",
         "transcriptSegments",
+        "totalWords",
+        "speakingDurationMs",
+        "silenceDurationMs",
+        "paceBand",
         "notes"
       ],
       "additionalProperties": false
@@ -281,11 +351,51 @@
             "null"
           ]
         },
-        "scope": {
+        "lifecycle": {
           "type": "string"
         },
-        "state": {
-          "type": "string"
+        "activeProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replayMode": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "chunksReceived": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partialUpdates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "finalSegments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalWords": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wordsPerMinute": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "paceBand": {
+          "type": "string",
+          "enum": [
+            "slow",
+            "good",
+            "fast",
+            "unknown"
+          ]
         },
         "detail": {
           "type": [
@@ -295,8 +405,12 @@
         }
       },
       "required": [
-        "scope",
-        "state"
+        "lifecycle",
+        "chunksReceived",
+        "partialUpdates",
+        "finalSegments",
+        "totalWords",
+        "paceBand"
       ],
       "additionalProperties": false
     },

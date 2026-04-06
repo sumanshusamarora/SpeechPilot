@@ -7,9 +7,10 @@ Current scope:
 - connect to the backend websocket
 - capture microphone audio in the browser
 - stream PCM16 audio chunks to the backend
-- render partial and final transcript events live
+- render a live partial line plus append-only final transcript segments
+- render live WPM and pace band updates
 - upload a WAV file through the replay endpoint
-- show raw websocket traffic for protocol debugging
+- show structured debug state and raw websocket traffic for protocol debugging
 
 ## Local setup
 
@@ -27,4 +28,6 @@ Notes:
 
 - live capture uses browser `getUserMedia` plus `AudioContext`
 - replay currently expects a local 16-bit PCM WAV file
+- replay responses return the same server-event shapes used by the live websocket flow
+- the debug panel reflects backend lifecycle, chunk counters, final segments, total words, and current WPM
 - this remains a developer-first surface, not the finished product UI

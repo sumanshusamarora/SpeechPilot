@@ -9,34 +9,44 @@ import pytest
 from speechpilot_contracts.events import (
     AudioChunkPayload,
     SessionSummaryPayload,
+    TranscriptSegmentPayload,
     TranscriptFinalEvent,
     TranscriptFinalPayload,
     TranscriptPartialEvent,
     TranscriptPartialPayload,
 )
 
+from app.domain.session_metrics import SessionMetricsSnapshot
+from app.domain.transcript import TranscriptSegment
 from app.persistence.realtime_store.managed import ManagedRealtimeStorePlaceholder
 from app.services.analytics import AnalyticsService
 from app.services.coaching import CoachingService
+from app.services.pace import PaceAnalyticsService
 from app.services.session_service import RealtimeSessionService
 
 
 class FakeSessionRepository:
     def __init__(self) -> None:
         self.opened_sessions: list[tuple[str, str]] = []
-        self.persisted_events: list[str] = []
-        self.closed_summaries: list[SessionSummaryPayload] = []
+        self.persisted_segments: list[TranscriptSegment] = []
+        self.metric_snapshots: list[SessionMetricsSnapshot] = []
+        self.closed_summaries: list[tuple[SessionSummaryPayload, str, str | None]] = []
 
     async def open_session(self, session, provider_name: str) -> None:
         self.opened_sessions.append((session.session_id, provider_name))
 
-    async def append_transcript_events(self, session, events, provider_name: str) -> None:
-        del provider_name
-        self.persisted_events.extend(event.payload.text for event in events)
-
-    async def close_session(self, session, summary: SessionSummaryPayload) -> None:
+    async def append_transcript_segments(self, session, segments, provider_name: str) -> None:
         del session
-        self.closed_summaries.append(summary)
+        del provider_name
+        self.persisted_segments.extend(segments)
+
+    async def upsert_session_metrics(self, session, metrics: SessionMetricsSnapshot) -> None:
+        del session
+        self.metric_snapshots.append(metrics)
+
+    async def close_session(self, session, summary: SessionSummaryPayload, *, status: str, stop_reason: str | None) -> None:
+        del session
+        self.closed_summaries.append((summary, status, stop_reason))
 
     async def close(self) -> None:
         return None
@@ -70,8 +80,13 @@ class FakeSpeechToTextProvider:
             TranscriptFinalEvent(
                 payload=TranscriptFinalPayload(
                     sessionId=session.session_id,
-                    text="final transcript",
-                    utteranceId=f"{session.session_id}:1",
+                    segment=TranscriptSegmentPayload(
+                        id=f"{session.session_id}:1",
+                        text="final transcript",
+                        startTimeMs=0,
+                        endTimeMs=600,
+                        wordCount=2,
+                    ),
                 )
             )
         ]
@@ -100,8 +115,16 @@ async def test_run_replay_persists_summary_and_transcript_events() -> None:
         session_repository=repository,
         stt_provider=FakeSpeechToTextProvider(),
         analytics_service=AnalyticsService(),
+        pace_service=PaceAnalyticsService(
+            window_ms=30000,
+            smoothing_factor=0.35,
+            slow_threshold_wpm=110,
+            fast_threshold_wpm=160,
+        ),
         coaching_service=CoachingService(),
         replay_chunk_duration_ms=250,
+        replay_chunk_delay_ms=0,
+        debug_snapshot_chunk_interval=4,
     )
 
     result = await service.run_replay(
@@ -112,18 +135,24 @@ async def test_run_replay_persists_summary_and_transcript_events() -> None:
 
     assert result.session_id.startswith("replay-")
     assert result.summary.transcriptSegments == 1
+    assert result.summary.totalWords == 2
     assert result.summary.durationMs > 0
-    assert [event.payload.text for event in result.transcript_events] == [
+    transcript_events = [event for event in result.events if event.type in {"transcript.partial", "transcript.final"}]
+    assert [
+        event.payload.text if event.type == "transcript.partial" else event.payload.segment.text
+        for event in transcript_events
+    ] == [
         "partial-1",
         "partial-2",
         "partial-3",
         "final transcript",
     ]
+    assert any(event.type == "pace.update" for event in result.events)
+    assert any(event.type == "debug.state" for event in result.events)
     assert repository.opened_sessions == [(result.session_id, "fake-stt")]
-    assert repository.persisted_events == [
-        "partial-1",
-        "partial-2",
-        "partial-3",
-        "final transcript",
-    ]
-    assert repository.closed_summaries[0].sessionId == result.session_id
+    assert [segment.text for segment in repository.persisted_segments] == ["final transcript"]
+    assert repository.metric_snapshots[-1].partial_updates == 3
+    assert repository.metric_snapshots[-1].final_segments == 1
+    assert repository.metric_snapshots[-1].total_words == 2
+    assert repository.closed_summaries[0][0].sessionId == result.session_id
+    assert repository.closed_summaries[0][1] == "completed"

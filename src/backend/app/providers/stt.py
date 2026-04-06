@@ -16,10 +16,12 @@ from speechpilot_contracts.events import (
     TranscriptFinalPayload,
     TranscriptPartialEvent,
     TranscriptPartialPayload,
+    TranscriptSegmentPayload,
 )
 
 from app.config.settings import Settings
 from app.domain.session import SessionContext
+from app.domain.transcript import count_words
 
 TranscribeCallable = Callable[[np.ndarray], str]
 
@@ -32,6 +34,8 @@ class StreamingSessionState:
     silence_duration_ms: int = 0
     partial_sequence: int = 0
     utterance_index: int = 0
+    session_elapsed_ms: int = 0
+    segment_start_ms: int | None = None
     last_partial_text: str = ""
 
 
@@ -126,8 +130,13 @@ class FasterWhisperSpeechToTextProvider:
 
         rms = float(np.sqrt(np.mean(np.square(samples), dtype=np.float64)))
         chunk_duration_ms = int(round(samples.shape[0] * 1000 / self._target_sample_rate_hz))
+        chunk_start_ms = state.session_elapsed_ms
+        state.session_elapsed_ms += chunk_duration_ms
         if rms < self._speech_threshold and state.sample_count == 0:
             return []
+
+        if state.sample_count == 0 and state.segment_start_ms is None:
+            state.segment_start_ms = chunk_start_ms
 
         state.sample_chunks.append(samples)
         state.sample_count += samples.shape[0]
@@ -157,12 +166,18 @@ class FasterWhisperSpeechToTextProvider:
             final_text = await self._transcribe_state(state)
             if final_text:
                 state.utterance_index += 1
+                segment_end_ms = max(state.segment_start_ms or 0, state.session_elapsed_ms - state.silence_duration_ms)
                 events.append(
                     TranscriptFinalEvent(
                         payload=TranscriptFinalPayload(
                             sessionId=session.session_id,
-                            text=final_text,
-                            utteranceId=f"{session.session_id}:{state.utterance_index}",
+                            segment=TranscriptSegmentPayload(
+                                id=f"{session.session_id}:{state.utterance_index}",
+                                text=final_text,
+                                startTimeMs=state.segment_start_ms or 0,
+                                endTimeMs=segment_end_ms,
+                                wordCount=count_words(final_text),
+                            ),
                         )
                     )
                 )
@@ -184,8 +199,13 @@ class FasterWhisperSpeechToTextProvider:
             TranscriptFinalEvent(
                 payload=TranscriptFinalPayload(
                     sessionId=session.session_id,
-                    text=final_text,
-                    utteranceId=f"{session.session_id}:{state.utterance_index}",
+                    segment=TranscriptSegmentPayload(
+                        id=f"{session.session_id}:{state.utterance_index}",
+                        text=final_text,
+                        startTimeMs=state.segment_start_ms or max(0, state.session_elapsed_ms - int(round(state.sample_count * 1000 / self._target_sample_rate_hz))),
+                        endTimeMs=state.session_elapsed_ms,
+                        wordCount=count_words(final_text),
+                    ),
                 )
             )
         ]
@@ -285,4 +305,5 @@ class FasterWhisperSpeechToTextProvider:
         state.sample_count = 0
         state.last_partial_sample_count = 0
         state.silence_duration_ms = 0
+        state.segment_start_ms = None
         state.last_partial_text = ""

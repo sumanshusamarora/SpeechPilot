@@ -8,8 +8,13 @@ import {
   createSessionStopEvent,
   type AudioChunkPayload,
   type ClientEvent,
+  type DebugStateEvent,
+  type DebugStatePayload,
+  type PaceUpdateEvent,
+  type PaceUpdatePayload,
   type SessionSummaryPayload,
   type ServerEvent,
+  type TranscriptSegment,
   type TranscriptFinalEvent,
   type TranscriptPartialEvent,
 } from "@/lib/contracts";
@@ -29,9 +34,7 @@ interface LogEntry {
   payload: ClientEvent | ServerEvent | { message: string } | string;
 }
 
-interface FinalTranscriptSegment {
-  utteranceId: string;
-  text: string;
+interface FinalTranscriptSegment extends TranscriptSegment {
   timestamp: string;
 }
 
@@ -54,6 +57,8 @@ export function useWebsocketSession() {
   const [sessionState, setSessionState] = useState<SessionState>("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
   const [finalSegments, setFinalSegments] = useState<FinalTranscriptSegment[]>([]);
+  const [paceUpdate, setPaceUpdate] = useState<PaceUpdatePayload | null>(null);
+  const [debugState, setDebugState] = useState<DebugStatePayload | null>(null);
   const [summary, setSummary] = useState<SessionSummaryPayload | null>(null);
   const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
 
@@ -94,11 +99,20 @@ export function useWebsocketSession() {
       setFinalSegments((currentSegments) => [
         ...currentSegments,
         {
-          utteranceId: payload.payload.utteranceId,
-          text: payload.payload.text,
+          ...payload.payload.segment,
           timestamp: payload.timestamp,
         },
       ]);
+      return;
+    }
+    if (event.type === "pace.update") {
+      const payload = event as PaceUpdateEvent;
+      setPaceUpdate(payload.payload);
+      return;
+    }
+    if (event.type === "debug.state") {
+      const payload = event as DebugStateEvent;
+      setDebugState(payload.payload);
       return;
     }
     if (event.type === "session.summary") {
@@ -190,6 +204,8 @@ export function useWebsocketSession() {
     setSessionId(nextSessionId);
     setPartialTranscript("");
     setFinalSegments([]);
+    setPaceUpdate(null);
+    setDebugState(null);
     setSummary(null);
     setMicErrorMessage(null);
     updateSessionState("starting");
@@ -253,7 +269,9 @@ export function useWebsocketSession() {
     disconnect,
     entries,
     finalSegments,
+    debugState,
     micErrorMessage,
+    paceUpdate,
     partialTranscript,
     setSessionId,
     sessionId,

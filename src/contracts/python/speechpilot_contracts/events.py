@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 PROTOCOL_VERSION = "1.0"
+PaceBand = Literal["slow", "good", "fast", "unknown"]
 
 
 def _utc_now() -> datetime:
@@ -55,21 +56,34 @@ class TranscriptPartialPayload(BaseModel):
     sequence: int
 
 
+class TranscriptSegmentPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    text: str
+    startTimeMs: int
+    endTimeMs: int
+    wordCount: int
+
+
 class TranscriptFinalPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sessionId: str
-    text: str
-    utteranceId: str
+    segment: TranscriptSegmentPayload
 
 
 class PaceUpdatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sessionId: str
-    wordsPerMinute: float | None = None
-    band: Literal["slow", "on_target", "fast", "unknown"] = "unknown"
+    wordsPerMinute: float
+    band: PaceBand
     source: str
+    totalWords: int
+    speakingDurationMs: int
+    silenceDurationMs: int
+    windowDurationMs: int
 
 
 class FeedbackUpdatePayload(BaseModel):
@@ -87,7 +101,11 @@ class SessionSummaryPayload(BaseModel):
     sessionId: str
     durationMs: int
     transcriptSegments: int
+    totalWords: int
     averageWpm: float | None = None
+    speakingDurationMs: int
+    silenceDurationMs: int
+    paceBand: PaceBand = "unknown"
     notes: list[str] = Field(default_factory=list)
 
 
@@ -95,8 +113,15 @@ class DebugStatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sessionId: str | None = None
-    scope: str
-    state: str
+    lifecycle: str
+    activeProvider: str | None = None
+    replayMode: bool | None = None
+    chunksReceived: int = 0
+    partialUpdates: int = 0
+    finalSegments: int = 0
+    totalWords: int = 0
+    wordsPerMinute: float | None = None
+    paceBand: PaceBand = "unknown"
     detail: str | None = None
 
 

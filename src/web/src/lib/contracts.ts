@@ -35,17 +35,28 @@ export interface TranscriptPartialPayload {
   sequence: number;
 }
 
+export interface TranscriptSegment {
+  id: string;
+  text: string;
+  startTimeMs: number;
+  endTimeMs: number;
+  wordCount: number;
+}
+
 export interface TranscriptFinalPayload {
   sessionId: string;
-  text: string;
-  utteranceId: string;
+  segment: TranscriptSegment;
 }
 
 export interface PaceUpdatePayload {
   sessionId: string;
-  wordsPerMinute?: number | null;
-  band: "slow" | "on_target" | "fast" | "unknown";
+  wordsPerMinute: number;
+  band: "slow" | "good" | "fast" | "unknown";
   source: string;
+  totalWords: number;
+  speakingDurationMs: number;
+  silenceDurationMs: number;
+  windowDurationMs: number;
 }
 
 export interface FeedbackUpdatePayload {
@@ -59,14 +70,25 @@ export interface SessionSummaryPayload {
   sessionId: string;
   durationMs: number;
   transcriptSegments: number;
+  totalWords: number;
   averageWpm?: number | null;
+  speakingDurationMs: number;
+  silenceDurationMs: number;
+  paceBand: "slow" | "good" | "fast" | "unknown";
   notes: string[];
 }
 
 export interface DebugStatePayload {
   sessionId?: string | null;
-  scope: string;
-  state: string;
+  lifecycle: string;
+  activeProvider?: string | null;
+  replayMode?: boolean | null;
+  chunksReceived: number;
+  partialUpdates: number;
+  finalSegments: number;
+  totalWords: number;
+  wordsPerMinute?: number | null;
+  paceBand: "slow" | "good" | "fast" | "unknown";
   detail?: string | null;
 }
 
