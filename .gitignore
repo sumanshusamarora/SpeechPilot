@@ -44,6 +44,7 @@ replay_pid*
 *.jks
 *.base64
 .env*
+!infra/docker/.env*
 
 # Python virtual environments
 .venv/

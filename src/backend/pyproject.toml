@@ -8,9 +8,15 @@ version = "0.1.0"
 description = "SpeechPilot v2 FastAPI backend scaffold."
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.16,<2",
+  "faster-whisper>=1.1,<2",
   "fastapi>=0.115,<1",
+  "numpy>=2,<3",
   "pydantic-settings>=2.6,<3",
+  "psycopg[binary]>=3.2,<4",
+  "python-multipart>=0.0.12,<1",
   "redis>=5,<6",
+  "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.32,<1"
 ]
 

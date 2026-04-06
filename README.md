@@ -13,8 +13,8 @@ This repository now contains two tracks:
 
 Current v2 scaffold locations:
 
-- `src/backend` — FastAPI backend scaffold
-- `src/web` — Next.js debug shell
+- `src/backend` — FastAPI realtime backend with live STT, replay, and persistence
+- `src/web` — Next.js live debug shell with browser mic streaming and replay upload
 - `src/contracts` — shared realtime contracts
 - `infra/docker` — local docker-compose stack
 

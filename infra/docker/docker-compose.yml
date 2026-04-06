@@ -10,6 +10,12 @@ services:
       SPEECHPILOT_POSTGRES_URL: ${SPEECHPILOT_POSTGRES_URL:-postgresql://speechpilot:speechpilot@postgres:5432/speechpilot}
       SPEECHPILOT_REDIS_URL: ${SPEECHPILOT_REDIS_URL:-redis://redis:6379/0}
       SPEECHPILOT_REALTIME_STORE_BACKEND: ${SPEECHPILOT_REALTIME_STORE_BACKEND:-redis}
+      SPEECHPILOT_REPLAY_ENABLED: ${SPEECHPILOT_REPLAY_ENABLED:-true}
+      SPEECHPILOT_STT_MODEL_SIZE: ${SPEECHPILOT_STT_MODEL_SIZE:-small.en}
+      SPEECHPILOT_STT_LANGUAGE: ${SPEECHPILOT_STT_LANGUAGE:-en}
+      SPEECHPILOT_STT_DEVICE: ${SPEECHPILOT_STT_DEVICE:-cpu}
+      SPEECHPILOT_STT_COMPUTE_TYPE: ${SPEECHPILOT_STT_COMPUTE_TYPE:-int8}
+      SPEECHPILOT_REPLAY_CHUNK_DURATION_MS: ${SPEECHPILOT_REPLAY_CHUNK_DURATION_MS:-500}
     depends_on:
       postgres:
         condition: service_healthy
@@ -20,6 +26,7 @@ services:
     volumes:
       - ../../src/backend:/workspace/src/backend
       - ../../src/contracts/python:/workspace/src/contracts/python
+      - backend_model_cache:/workspace/.cache/huggingface
 
   web:
     build:
@@ -40,7 +47,7 @@ services:
       - web_node_modules:/workspace/src/web/node_modules
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-speechpilot}
       POSTGRES_USER: ${POSTGRES_USER:-speechpilot}
@@ -51,7 +58,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -59,11 +66,12 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-16379}:6379"
     volumes:
       - redis_data:/data
 
 volumes:
+  backend_model_cache:
   postgres_data:
   redis_data:
   web_node_modules:

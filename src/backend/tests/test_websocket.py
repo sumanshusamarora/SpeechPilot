@@ -1,10 +1,8 @@
 from fastapi.testclient import TestClient
 
-from app.main import app
 
-
-def test_websocket_session_start_and_stop_flow() -> None:
-    with TestClient(app) as client:
+def test_websocket_session_start_and_stop_flow(test_app) -> None:
+    with TestClient(test_app) as client:
         with client.websocket_connect("/ws") as websocket:
             connected_event = websocket.receive_json()
             assert connected_event["type"] == "debug.state"

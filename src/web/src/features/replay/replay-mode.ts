@@ -1,6 +1,6 @@
 export const replayFeature = {
-  status: "reserved",
+  status: "available",
   description:
-    "Recorded-audio replay is intentionally deferred. This feature boundary exists so fixture-driven sessions can be added without reshaping the app shell.",
-  plannedInputs: ["local fixture upload", "sample catalog", "contract replay"],
+    "Replay mode accepts a local 16-bit PCM WAV upload and pushes it through the same backend transcription pipeline used by live websocket audio.",
+  plannedInputs: ["local WAV upload", "fixture catalog", "contract replay"],
 } as const;

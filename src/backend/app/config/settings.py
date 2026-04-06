@@ -34,7 +34,18 @@ class Settings(BaseSettings):
     postgres_url: str = "postgresql://speechpilot:speechpilot@postgres:5432/speechpilot"
     redis_url: str = "redis://redis:6379/0"
     realtime_store_backend: RealtimeStoreBackend = RealtimeStoreBackend.REDIS
-    replay_enabled: bool = False
+    replay_enabled: bool = True
+    stt_provider_name: str = "faster_whisper"
+    stt_model_size: str = "tiny.en"
+    stt_language: str = "en"
+    stt_device: str = "cpu"
+    stt_compute_type: str = "int8"
+    stt_target_sample_rate_hz: int = 16000
+    stt_partial_interval_ms: int = 1600
+    stt_silence_duration_ms: int = 900
+    stt_min_utterance_ms: int = 900
+    stt_speech_threshold: float = 0.015
+    replay_chunk_duration_ms: int = 500
 
 
 @lru_cache

@@ -1,16 +1,15 @@
 # SpeechPilot Web
 
-Minimal Next.js debug surface for SpeechPilot v2.
+Next.js debug surface for the first SpeechPilot v2 live transcription slice.
 
 Current scope:
 
 - connect to the backend websocket
-- show connection state
-- send a mock `session.start`
-- send a mock `session.stop`
-- render a live debug log of incoming and outgoing events
-
-This is intentionally a developer-first shell, not the finished product UI.
+- capture microphone audio in the browser
+- stream PCM16 audio chunks to the backend
+- render partial and final transcript events live
+- upload a WAV file through the replay endpoint
+- show raw websocket traffic for protocol debugging
 
 ## Local setup
 
@@ -24,6 +23,8 @@ Environment variables:
 - `NEXT_PUBLIC_BACKEND_HTTP_URL` defaults to `http://localhost:8000`
 - `NEXT_PUBLIC_BACKEND_WS_URL` defaults to `ws://localhost:8000/ws`
 
-## Replay/testing direction
+Notes:
 
-Replay support is intentionally deferred, but the web client already has a reserved feature boundary under `src/features/replay` so recorded-audio flows can be added without restructuring the app shell.
+- live capture uses browser `getUserMedia` plus `AudioContext`
+- replay currently expects a local 16-bit PCM WAV file
+- this remains a developer-first surface, not the finished product UI

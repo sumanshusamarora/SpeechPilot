@@ -18,11 +18,14 @@ Services:
 
 - backend: `http://localhost:8000`
 - web: `http://localhost:3000`
-- postgres: `localhost:5432`
-- redis: `localhost:6379`
+- postgres: `localhost:15432` by default, configurable via `POSTGRES_HOST_PORT`
+- redis: `localhost:16379` by default, configurable via `REDIS_HOST_PORT`
 
 Notes:
 
 - source directories are mounted for local iteration
 - Redis is the default realtime store for local development
 - a managed realtime store can replace Redis later by changing backend configuration only
+- the backend runs `alembic upgrade head` before starting
+- the backend persists the Hugging Face model cache in a named volume so the Whisper model is not re-downloaded every boot
+- first live or replay transcription still needs to download the configured model once

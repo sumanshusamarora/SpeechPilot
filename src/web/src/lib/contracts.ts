@@ -151,14 +151,23 @@ export function createSessionStartEvent(sessionId: string): SessionStartEvent {
   };
 }
 
-export function createSessionStopEvent(sessionId: string): SessionStopEvent {
+export function createAudioChunkEvent(payload: AudioChunkPayload): AudioChunkEvent {
+  return {
+    version: PROTOCOL_VERSION,
+    timestamp: new Date().toISOString(),
+    type: "audio.chunk",
+    payload,
+  };
+}
+
+export function createSessionStopEvent(sessionId: string, reason = "manual_stop"): SessionStopEvent {
   return {
     version: PROTOCOL_VERSION,
     timestamp: new Date().toISOString(),
     type: "session.stop",
     payload: {
       sessionId,
-      reason: "manual_stop",
+      reason,
     },
   };
 }

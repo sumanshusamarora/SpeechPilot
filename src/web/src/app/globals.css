@@ -259,6 +259,34 @@ input {
   word-break: break-word;
 }
 
+.transcript-list {
+  display: grid;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.transcript-item {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(13, 92, 74, 0.12);
+  border-radius: 18px;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.transcript-item strong {
+  color: var(--accent);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.transcript-item p {
+  color: var(--text-main);
+}
+
 .log-panel {
   min-height: 420px;
 }
