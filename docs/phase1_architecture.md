@@ -2,7 +2,7 @@
 
 ## Overview
 
-SpeechPilot is a native Android application that captures microphone audio in real time, detects
+SpeechPilot's Android client lives under `src/android` and captures microphone audio in real time, detects
 speech activity, segments utterances, estimates speaking pace, and delivers lightweight feedback to
 the user.
 
@@ -207,7 +207,7 @@ When Whisper is selected, `UserPreferences.whisperModelId` controls which local 
   Whisper's required **16 kHz** rate before inference. This same helper is reused by file benchmarks so
   file-path evaluation and live-path evaluation exercise the same audio contract.
 - Whisper's native runtime (`libwhisper_jni.so`) is built automatically by CMake `FetchContent` during
-  `./gradlew assembleDebug`. whisper.cpp v1.7.2 is fetched from GitHub on first build (requires network);
+  `./src/android/gradlew assembleDebug`. whisper.cpp v1.7.2 is fetched from GitHub on first build (requires network);
   subsequent builds use the CMake cache. NDK `26.3.11579264` is pinned. ABIs: `arm64-v8a`, `x86_64`.
   If the library fails to load at runtime, `WhisperNative.isAvailable = false` →
   `TranscriptionEngineStatus.NativeLibraryUnavailable` → automatic fallback to Android SR.

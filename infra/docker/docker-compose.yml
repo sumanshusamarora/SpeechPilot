@@ -1,0 +1,83 @@
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: src/backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      SPEECHPILOT_ENVIRONMENT: ${SPEECHPILOT_ENVIRONMENT:-local}
+      SPEECHPILOT_POSTGRES_URL: ${SPEECHPILOT_POSTGRES_URL:-postgresql://speechpilot:speechpilot@postgres:5432/speechpilot}
+      SPEECHPILOT_REDIS_URL: ${SPEECHPILOT_REDIS_URL:-redis://redis:6379/0}
+      SPEECHPILOT_REALTIME_STORE_BACKEND: ${SPEECHPILOT_REALTIME_STORE_BACKEND:-redis}
+      SPEECHPILOT_REPLAY_ENABLED: ${SPEECHPILOT_REPLAY_ENABLED:-true}
+      SPEECHPILOT_STT_MODEL_SIZE: ${SPEECHPILOT_STT_MODEL_SIZE:-small.en}
+      SPEECHPILOT_STT_LANGUAGE: ${SPEECHPILOT_STT_LANGUAGE:-en}
+      SPEECHPILOT_STT_DEVICE: ${SPEECHPILOT_STT_DEVICE:-cpu}
+      SPEECHPILOT_STT_COMPUTE_TYPE: ${SPEECHPILOT_STT_COMPUTE_TYPE:-int8}
+      SPEECHPILOT_REPLAY_CHUNK_DURATION_MS: ${SPEECHPILOT_REPLAY_CHUNK_DURATION_MS:-500}
+      SPEECHPILOT_REPLAY_CHUNK_DELAY_MS: ${SPEECHPILOT_REPLAY_CHUNK_DELAY_MS:-0}
+      SPEECHPILOT_PACE_WINDOW_MS: ${SPEECHPILOT_PACE_WINDOW_MS:-30000}
+      SPEECHPILOT_PACE_SMOOTHING_FACTOR: ${SPEECHPILOT_PACE_SMOOTHING_FACTOR:-0.35}
+      SPEECHPILOT_PACE_SLOW_THRESHOLD_WPM: ${SPEECHPILOT_PACE_SLOW_THRESHOLD_WPM:-110}
+      SPEECHPILOT_PACE_FAST_THRESHOLD_WPM: ${SPEECHPILOT_PACE_FAST_THRESHOLD_WPM:-160}
+      SPEECHPILOT_DEBUG_SNAPSHOT_CHUNK_INTERVAL: ${SPEECHPILOT_DEBUG_SNAPSHOT_CHUNK_INTERVAL:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../src/backend:/workspace/src/backend
+      - ../../src/contracts/python:/workspace/src/contracts/python
+      - backend_model_cache:/workspace/.cache/huggingface
+
+  web:
+    build:
+      context: ../..
+      dockerfile: src/web/Dockerfile
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_BACKEND_HTTP_URL: ${NEXT_PUBLIC_BACKEND_HTTP_URL:-http://localhost:8000}
+      NEXT_PUBLIC_BACKEND_WS_URL: ${NEXT_PUBLIC_BACKEND_WS_URL:-ws://localhost:8000/ws}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../src/web:/workspace/src/web
+      - ../../src/contracts/typescript:/workspace/src/contracts/typescript
+      - web_node_modules:/workspace/src/web/node_modules
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-speechpilot}
+      POSTGRES_USER: ${POSTGRES_USER:-speechpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-speechpilot}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_HOST_PORT:-16379}:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  backend_model_cache:
+  postgres_data:
+  redis_data:
+  web_node_modules:

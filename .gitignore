@@ -44,3 +44,19 @@ replay_pid*
 *.jks
 *.base64
 .env*
+!infra/docker/.env*
+
+# Python virtual environments
+.venv/
+venv/
+*.pyc
+__pycache__/
+*.egg-info/
+
+# Pytest cache
+.pytest_cache/
+
+# Next.js build output
+.next/
+node_modules/
+package-lock.json

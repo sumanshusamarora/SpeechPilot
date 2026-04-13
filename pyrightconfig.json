@@ -1,0 +1,20 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "executionEnvironments": [
+    {
+      "root": "src/backend",
+      "extraPaths": [
+        "src/backend",
+        "src/contracts/python"
+      ]
+    },
+    {
+      "root": "src/contracts/python",
+      "extraPaths": [
+        "src/contracts/python"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,386 @@
+name: Backend Infrastructure (Pulumi)
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_env:
+        description: Target deployment environment
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - development
+          - staging
+          - production
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      deploy_env: ${{ steps.env.outputs.deploy_env }}
+      github_environment: ${{ steps.env.outputs.github_environment }}
+      pulumi_command: ${{ steps.command.outputs.pulumi_command }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve environment
+        id: env
+        shell: bash
+        env:
+          DEPLOY_ENV_OVERRIDE: ${{ github.event.inputs.deploy_env }}
+        run: |
+          set -euo pipefail
+          bash scripts/resolve-deploy-env.sh "$GITHUB_OUTPUT"
+
+      - name: Resolve Pulumi command
+        id: command
+        shell: bash
+        env:
+          DEPLOY_ENV_OVERRIDE: ${{ github.event.inputs.deploy_env }}
+        run: |
+          set -euo pipefail
+          REF="${GITHUB_REF:-}"
+          PULUMI_COMMAND='preview'
+          if [ -n "${DEPLOY_ENV_OVERRIDE:-}" ] && [ "${DEPLOY_ENV_OVERRIDE}" != 'auto' ]; then
+            PULUMI_COMMAND='up'
+          else
+            case "${REF}" in
+              refs/heads/main|refs/tags/staging-*|refs/tags/production-*)
+                PULUMI_COMMAND='up'
+                ;;
+            esac
+          fi
+          echo "pulumi_command=${PULUMI_COMMAND}" >> "$GITHUB_OUTPUT"
+
+  apply:
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.github_environment }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-2' }}
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
+      PROJECT_PROVISIONER_ROLE_ARN: ${{ vars.PROJECT_PROVISIONER_ROLE_ARN || vars.PROVISIONER_ROLE_ARN }}
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME || '' }}
+      VPC_ID: ${{ vars.VPC_ID || '' }}
+      CACHE_SUBNET_IDS: ${{ vars.CACHE_SUBNET_IDS || '' }}
+      CACHE_ALLOWED_SECURITY_GROUP_IDS: ${{ vars.CACHE_ALLOWED_SECURITY_GROUP_IDS || '' }}
+      CACHE_ALLOWED_CIDR_BLOCKS: ${{ vars.CACHE_ALLOWED_CIDR_BLOCKS || '' }}
+      CACHE_NODE_TYPE: ${{ vars.CACHE_NODE_TYPE || '' }}
+      CACHE_NUM_CACHE_CLUSTERS: ${{ vars.CACHE_NUM_CACHE_CLUSTERS || '' }}
+      CACHE_ENGINE_VERSION: ${{ vars.CACHE_ENGINE_VERSION || '' }}
+      DEPLOY_ENV: ${{ needs.resolve.outputs.deploy_env }}
+      PULUMI_COMMAND: ${{ needs.resolve.outputs.pulumi_command }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Pulumi pipeline configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${PULUMI_BACKEND_URL}" ]; then
+            echo "Missing PULUMI_BACKEND_URL (GitHub Actions Variable)." >&2
+            exit 1
+          fi
+          if [ -z "${PROJECT_PROVISIONER_ROLE_ARN}" ]; then
+            echo "Missing PROJECT_PROVISIONER_ROLE_ARN or PROVISIONER_ROLE_ARN (GitHub Actions Variable)." >&2
+            exit 1
+          fi
+          if [ -z "${EKS_CLUSTER_NAME}" ] && { [ -z "${VPC_ID}" ] || [ -z "${CACHE_SUBNET_IDS}" ]; }; then
+            echo "Missing EKS_CLUSTER_NAME or the explicit VPC_ID/CACHE_SUBNET_IDS network settings." >&2
+            exit 1
+          fi
+          if [ -z "${EKS_CLUSTER_NAME}" ] && [ -z "${CACHE_ALLOWED_SECURITY_GROUP_IDS}" ] && [ -z "${CACHE_ALLOWED_CIDR_BLOCKS}" ]; then
+            echo "Missing CACHE_ALLOWED_SECURITY_GROUP_IDS or CACHE_ALLOWED_CIDR_BLOCKS for ElastiCache access control." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (base provisioner)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PROJECT_PROVISIONER_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: speechpilot-backend-infra-base
+          audience: sts.amazonaws.com
+
+      - name: Resolve EKS network settings
+        if: env.EKS_CLUSTER_NAME != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${VPC_ID}" ]; then
+            RESOLVED_VPC_ID=$(aws eks describe-cluster \
+              --name "${EKS_CLUSTER_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'cluster.resourcesVpcConfig.vpcId' \
+              --output text)
+            echo "VPC_ID=${RESOLVED_VPC_ID}" >> "${GITHUB_ENV}"
+          fi
+          if [ -z "${CACHE_SUBNET_IDS}" ]; then
+            RESOLVED_SUBNET_IDS=$(aws eks describe-cluster \
+              --name "${EKS_CLUSTER_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'cluster.resourcesVpcConfig.subnetIds' \
+              --output text | tr '\t' ',')
+            echo "CACHE_SUBNET_IDS=${RESOLVED_SUBNET_IDS}" >> "${GITHUB_ENV}"
+          fi
+          if [ -z "${CACHE_ALLOWED_SECURITY_GROUP_IDS}" ]; then
+            RESOLVED_CLUSTER_SG=$(aws eks describe-cluster \
+              --name "${EKS_CLUSTER_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' \
+              --output text)
+            echo "CACHE_ALLOWED_SECURITY_GROUP_IDS=${RESOLVED_CLUSTER_SG}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Create dedicated provisioner role
+        id: provisioner_role
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${PULUMI_COMMAND}" != "up" ]; then
+            echo "Running preview mode - skipping dedicated role creation"
+            exit 0
+          fi
+
+          ROLE_NAME="speechpilot-backend-provisioner-${DEPLOY_ENV}"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+
+          cat > /tmp/trust-policy.json << EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+                  },
+                  "StringLike": {
+                    "token.actions.githubusercontent.com:sub": "repo:${{ github.repository }}:*"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+
+          if aws iam get-role --role-name "${ROLE_NAME}" >/dev/null 2>&1; then
+            echo "Role exists: ${ROLE_NAME}"
+          else
+            aws iam create-role \
+              --role-name "${ROLE_NAME}" \
+              --assume-role-policy-document file:///tmp/trust-policy.json \
+              --description "Dedicated provisioner role for SpeechPilot backend ${DEPLOY_ENV}" \
+              --tags Key=project,Value=speechpilot Key=component,Value=backend Key=environment,Value=${DEPLOY_ENV} Key=managed-by,Value=github-actions
+          fi
+
+          cat > /tmp/iam-policy.json << EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "IAMManagement",
+                "Effect": "Allow",
+                "Action": [
+                  "iam:CreateRole",
+                  "iam:GetRole",
+                  "iam:UpdateRole",
+                  "iam:UpdateAssumeRolePolicy",
+                  "iam:DeleteRole",
+                  "iam:TagRole",
+                  "iam:UntagRole",
+                  "iam:ListRoleTags",
+                  "iam:AttachRolePolicy",
+                  "iam:DetachRolePolicy",
+                  "iam:CreatePolicy",
+                  "iam:GetPolicy",
+                  "iam:GetPolicyVersion",
+                  "iam:ListPolicyVersions",
+                  "iam:DeletePolicy",
+                  "iam:CreatePolicyVersion",
+                  "iam:DeletePolicyVersion",
+                  "iam:TagPolicy",
+                  "iam:UntagPolicy",
+                  "iam:PutRolePolicy",
+                  "iam:GetRolePolicy",
+                  "iam:DeleteRolePolicy",
+                  "iam:ListAttachedRolePolicies",
+                  "iam:ListRolePolicies"
+                ],
+                "Resource": [
+                  "arn:aws:iam::${ACCOUNT_ID}:role/speechpilot-backend-*",
+                  "arn:aws:iam::${ACCOUNT_ID}:policy/speechpilot-backend-*"
+                ]
+              },
+              {
+                "Sid": "PassRole",
+                "Effect": "Allow",
+                "Action": ["iam:PassRole"],
+                "Resource": ["arn:aws:iam::${ACCOUNT_ID}:role/speechpilot-backend-*"]
+              }
+            ]
+          }
+          EOF
+
+          cat > /tmp/data-policy.json << EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PulumiStateBucketAccess",
+                "Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
+                "Resource": [
+                  "arn:aws:s3:::${PULUMI_BACKEND_URL#s3://}",
+                  "arn:aws:s3:::${PULUMI_BACKEND_URL#s3://}/*"
+                ]
+              },
+              {
+                "Sid": "ElasticacheManagement",
+                "Effect": "Allow",
+                "Action": [
+                  "elasticache:AddTagsToResource",
+                  "elasticache:CreateCacheSubnetGroup",
+                  "elasticache:CreateReplicationGroup",
+                  "elasticache:DeleteCacheSubnetGroup",
+                  "elasticache:DeleteReplicationGroup",
+                  "elasticache:DescribeCacheSubnetGroups",
+                  "elasticache:DescribeReplicationGroups",
+                  "elasticache:ListTagsForResource",
+                  "elasticache:ModifyCacheSubnetGroup",
+                  "elasticache:ModifyReplicationGroup",
+                  "elasticache:RemoveTagsFromResource"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Sid": "Ec2SecurityGroupManagement",
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:AuthorizeSecurityGroupEgress",
+                  "ec2:AuthorizeSecurityGroupIngress",
+                  "ec2:CreateSecurityGroup",
+                  "ec2:CreateTags",
+                  "ec2:DeleteSecurityGroup",
+                  "ec2:DeleteTags",
+                  "ec2:DescribeSecurityGroups",
+                  "ec2:DescribeSubnets",
+                  "ec2:DescribeVpcs",
+                  "ec2:RevokeSecurityGroupEgress",
+                  "ec2:RevokeSecurityGroupIngress"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Sid": "ECRRepositoryCreation",
+                "Effect": "Allow",
+                "Action": [
+                  "ecr:CreateRepository",
+                  "ecr:DescribeRepositories",
+                  "ecr:TagResource"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Sid": "EcrRepoManagement",
+                "Effect": "Allow",
+                "Action": [
+                  "ecr:DeleteRepository",
+                  "ecr:ListTagsForResource",
+                  "ecr:PutImageScanningConfiguration",
+                  "ecr:PutImageTagMutability",
+                  "ecr:UntagResource"
+                ],
+                "Resource": ["arn:aws:ecr:${AWS_REGION}:${ACCOUNT_ID}:repository/speechpilot-backend*"]
+              }
+            ]
+          }
+          EOF
+
+          for policy in iam data; do
+            POLICY_NAME="speechpilot-backend-provisioner-${policy}-${DEPLOY_ENV}"
+            POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}"
+            POLICY_FILE="/tmp/${policy}-policy.json"
+
+            if aws iam get-policy --policy-arn "${POLICY_ARN}" >/dev/null 2>&1; then
+              DEFAULT_VERSION=$(aws iam get-policy --policy-arn "${POLICY_ARN}" --query 'Policy.DefaultVersionId' --output text)
+              aws iam create-policy-version \
+                --policy-arn "${POLICY_ARN}" \
+                --policy-document file://${POLICY_FILE} \
+                --set-as-default
+              VERSION_COUNT=$(aws iam list-policy-versions --policy-arn "${POLICY_ARN}" --query 'length(Versions)' --output text)
+              if [ "${VERSION_COUNT}" -gt 4 ]; then
+                aws iam delete-policy-version --policy-arn "${POLICY_ARN}" --version-id "${DEFAULT_VERSION}" || true
+              fi
+            else
+              aws iam create-policy \
+                --policy-name "${POLICY_NAME}" \
+                --policy-document file://${POLICY_FILE} \
+                --description "${policy} permissions for SpeechPilot backend provisioner"
+            fi
+
+            if aws iam list-attached-role-policies --role-name "${ROLE_NAME}" --query "AttachedPolicies[?PolicyArn=='${POLICY_ARN}']" --output text | grep -q .; then
+              echo "Policy already attached: ${POLICY_NAME}"
+            else
+              aws iam attach-role-policy --role-name "${ROLE_NAME}" --policy-arn "${POLICY_ARN}"
+            fi
+          done
+
+          echo "role_arn=${ROLE_ARN}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (dedicated provisioner)
+        if: env.PULUMI_COMMAND == 'up' && steps.provisioner_role.outputs.role_arn != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.provisioner_role.outputs.role_arn }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: speechpilot-backend-infra-dedicated
+          audience: sts.amazonaws.com
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: infra/pulumi/requirements.txt
+
+      - name: Install Pulumi dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r infra/pulumi/requirements.txt
+
+      - name: Pulumi infrastructure provisioning
+        uses: pulumi/actions@v5
+        with:
+          command: ${{ env.PULUMI_COMMAND }}
+          work-dir: infra/pulumi
+          stack-name: speechpilot-backend-${{ env.DEPLOY_ENV }}
+          upsert: true
+        env:
+          PULUMI_BACKEND_URL: ${{ env.PULUMI_BACKEND_URL }}
+          PULUMI_CONFIG_PASSPHRASE: ""
+          AWS_REGION: ${{ env.AWS_REGION }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          VPC_ID: ${{ env.VPC_ID }}
+          CACHE_SUBNET_IDS: ${{ env.CACHE_SUBNET_IDS }}
+          CACHE_ALLOWED_SECURITY_GROUP_IDS: ${{ env.CACHE_ALLOWED_SECURITY_GROUP_IDS }}
+          CACHE_ALLOWED_CIDR_BLOCKS: ${{ env.CACHE_ALLOWED_CIDR_BLOCKS }}
+          CACHE_NODE_TYPE: ${{ env.CACHE_NODE_TYPE }}
+          CACHE_NUM_CACHE_CLUSTERS: ${{ env.CACHE_NUM_CACHE_CLUSTERS }}
+          CACHE_ENGINE_VERSION: ${{ env.CACHE_ENGINE_VERSION }}

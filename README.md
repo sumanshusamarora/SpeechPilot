@@ -4,6 +4,20 @@ A native Android application that provides real-time speech pace feedback to hel
 
 All core coaching pipeline processing runs locally on-device. No backend, cloud, or external services are required for pace estimation/feedback.
 
+## Transition Status
+
+This repository is now organized under `src/` by platform/runtime:
+
+Current v2 scaffold locations:
+
+- `src/android` — Android application and supporting modules
+- `src/backend` — FastAPI realtime backend with live STT, replay, and persistence
+- `src/web` — Next.js speaking-assistant shell with browser mic streaming, replay review, and session history
+- `src/contracts` — shared realtime contracts
+- `infra/docker` — local docker-compose stack
+
+New work should be added under the appropriate `src/` subtree. See `src/ARCHITECTURE.md` for the transition design and current structure.
+
 ---
 
 ## Project Status
@@ -14,22 +28,22 @@ All core coaching pipeline processing runs locally on-device. No backend, cloud,
 
 ## Architecture
 
-SpeechPilot is structured as a multi-module Android project. Each module has a single, focused responsibility.
+SpeechPilot's Android client lives in `src/android` as a multi-module Gradle project. Each module has a single, focused responsibility.
 
 | Module | Responsibility |
 |---|---|
-| `app` | Application entry point, wiring |
-| `ui` | Compose screens, ViewModels |
-| `session` | Session lifecycle orchestration |
-| `audio` | Microphone capture, `AudioFrame` emission |
-| `vad` | Voice activity detection |
-| `segmentation` | Speech segment buffering |
-| `pace` | Rate estimation, rolling metrics |
-| `feedback` | Decisioning and feedback events |
-| `data` | Persistence (Room, repositories) |
-| `settings` | User configuration (DataStore) |
-| `transcription` | Local transcription — Vosk or Whisper.cpp primary backend, Android SR fallback, rolling transcript WPM |
-| `modelmanager` | Generic on-device model provisioning — download, install, state tracking for Vosk, Whisper, and future models |
+| `src/android/app` | Application entry point, wiring |
+| `src/android/ui` | Compose screens, ViewModels |
+| `src/android/session` | Session lifecycle orchestration |
+| `src/android/audio` | Microphone capture, `AudioFrame` emission |
+| `src/android/vad` | Voice activity detection |
+| `src/android/segmentation` | Speech segment buffering |
+| `src/android/pace` | Rate estimation, rolling metrics |
+| `src/android/feedback` | Decisioning and feedback events |
+| `src/android/data` | Persistence (Room, repositories) |
+| `src/android/settings` | User configuration (DataStore) |
+| `src/android/transcription` | Local transcription — Vosk or Whisper.cpp primary backend, Android SR fallback, rolling transcript WPM |
+| `src/android/modelmanager` | Generic on-device model provisioning — download, install, state tracking for Vosk, Whisper, and future models |
 
 See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full architecture description.
 
@@ -43,28 +57,30 @@ See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full arch
 - Android SDK API 26+
 - Java 17+
 
+Run Android commands from the repository root:
+
 ### Build (debug)
 
 ```bash
-./gradlew assembleDebug
+./src/android/gradlew assembleDebug
 ```
 
 ### Build (release)
 
 ```bash
-./gradlew assembleRelease
+./src/android/gradlew assembleRelease
 ```
 
 ### Test
 
 ```bash
-./gradlew test
+./src/android/gradlew test
 ```
 
 ### Lint
 
 ```bash
-./gradlew lint
+./src/android/gradlew lint
 ```
 
 ---
@@ -72,7 +88,7 @@ See [docs/phase1_architecture.md](docs/phase1_architecture.md) for the full arch
 ## Module Dependency Graph
 
 ```
-app
+src/android/app
  ├── ui
  │    ├── session
  │    ├── feedback
@@ -158,7 +174,7 @@ The main screen now includes a file-based Whisper benchmark launcher for structu
 
 ##### Whisper native runtime (CMake + JNI)
 
-The native library is **built automatically** as part of a normal `./gradlew assembleDebug` build.
+The native library is **built automatically** as part of a normal `./src/android/gradlew assembleDebug` build.
 
 How it works:
 1. The `transcription` module declares an `externalNativeBuild` pointing to `transcription/src/main/cpp/CMakeLists.txt`

@@ -1,0 +1,1 @@
+"""Persistence boundaries for backend state and session storage."""
